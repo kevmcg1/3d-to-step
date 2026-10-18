@@ -2090,10 +2090,32 @@ const Importers = (() => {
     const u8 = new Uint8Array(buf), dv = new DataView(buf); let e = -1;
     for (let i = u8.length - 22; i >= Math.max(0, u8.length - 70000); i--) if (dv.getUint32(i, true) === 0x06054b50) { e = i; break; }
     if (e < 0) throw new Error('Not a valid zip / 3MF file.');
-    const n = dv.getUint16(e + 10, true); let p = dv.getUint32(e + 16, true); const files = new Map();
+    const u64 = (o) => dv.getUint32(o, true) + dv.getUint32(o + 4, true) * 4294967296;
+    let n = dv.getUint16(e + 10, true), p = dv.getUint32(e + 16, true); const files = new Map();
+    // ZIP64: the end record holds 0xFFFF / 0xFFFFFFFF placeholders and the real count and directory offset sit in the ZIP64 end record
+    if ((n === 0xFFFF || p === 0xFFFFFFFF) && e >= 20 && dv.getUint32(e - 20, true) === 0x07064b50) {
+      const z = u64(e - 12);
+      if (z + 56 <= u8.length && dv.getUint32(z, true) === 0x06064b50) { n = u64(z + 32); p = u64(z + 48); }
+    }
     for (let i = 0; i < n; i++) {
       if (dv.getUint32(p, true) !== 0x02014b50) break;
-      const method = dv.getUint16(p + 10, true), csize = dv.getUint32(p + 20, true), nl = dv.getUint16(p + 28, true), xl = dv.getUint16(p + 30, true), cl = dv.getUint16(p + 32, true), off = dv.getUint32(p + 42, true);
+      const method = dv.getUint16(p + 10, true), nl = dv.getUint16(p + 28, true), xl = dv.getUint16(p + 30, true), cl = dv.getUint16(p + 32, true);
+      let csize = dv.getUint32(p + 20, true), off = dv.getUint32(p + 42, true);
+      // ZIP64 entries keep a placeholder in the 32-bit field and the real 64-bit value in the 0x0001 extra field (uncompressed size, compressed size, offset, in that order, only those that are placeholders)
+      if (dv.getUint32(p + 24, true) === 0xFFFFFFFF || csize === 0xFFFFFFFF || off === 0xFFFFFFFF) {
+        let x = p + 46 + nl; const xe = x + xl;
+        while (x + 4 <= xe) {
+          const id = dv.getUint16(x, true), len = dv.getUint16(x + 2, true);
+          if (id === 0x0001) {
+            let q = x + 4;
+            if (dv.getUint32(p + 24, true) === 0xFFFFFFFF) q += 8;
+            if (csize === 0xFFFFFFFF) { csize = u64(q); q += 8; }
+            if (off === 0xFFFFFFFF) { off = u64(q); q += 8; }
+            break;
+          }
+          x += 4 + len;
+        }
+      }
       const name = td.decode(u8.subarray(p + 46, p + 46 + nl)); p += 46 + nl + xl + cl;
       const ln = dv.getUint16(off + 26, true), lx = dv.getUint16(off + 28, true), start = off + 30 + ln + lx;
       files.set(name, async () => (method === 0 ? u8.subarray(start, start + csize) : inflateRaw(u8.subarray(start, start + csize))));
