@@ -2667,8 +2667,10 @@ function scrollPanelTo(el, where = 'center') {
 }
 
 /* ---- tooltips: every button gets a data-tip; the bubble itself is pure CSS ---- */
+// The broken and fixable example models are kept in EX() below but hidden from the Examples menu for now; set this to true to show them again.
+const SHOW_BROKEN_EXAMPLES = false;
 const TIPS = {
-  btnHelp: 'Replay the guided tutorial', btnExamples: 'Sample and broken example models', btnExamples2: 'Sample and broken example models', btnOpen: 'Open a 3D file',
+  btnHelp: 'Replay the guided tutorial', btnExamples: SHOW_BROKEN_EXAMPLES ? 'Sample and broken example models' : 'Sample models', btnExamples2: SHOW_BROKEN_EXAMPLES ? 'Sample and broken example models' : 'Sample models', btnOpen: 'Open a 3D file',
   btnConvert: 'Convert and download STEP', btnConvert2: 'Convert and download STEP', btnBrowse: 'Choose a file from your computer', btnTour: 'Take the guided tour',
   toolSelect: 'Select faces (V)', toolMove: 'Move (G)', toolRotate: 'Rotate (R)', toolScale: 'Scale (S)', toolAnchor: 'Pick the pivot point (A)', toolSnap: 'Show snap points (M)',
   zIn: 'Zoom in', zOut: 'Zoom out', zFit: 'Fit to window', exClose: 'Close', mobileGo: 'Continue to the app',
@@ -2923,7 +2925,7 @@ const EX = () => {
       { id: 'bracket', icon: 'screwdriver-wrench', anim: 'wiggle', name: 'L bracket', note: 'Simple prismatic part: 8 faces, 18 edges, 12 corners.', tag: 'Clean', build: () => G.extrude([[0, 0], [30, 0], [30, 8], [8, 8], [8, 30], [0, 30]], 6) },
       { id: 'knot', icon: 'infinity', anim: 'tilt', name: 'Torus knot', note: 'Organic surface: one smooth face, stays faceted in STEP.', tag: 'Clean', build: () => G.upright(G.torusKnot(2, 3, 30, 3, 220, 16)) },
     ] },
-    { sec: 'Broken · gets fixed', color: '#fbbf24', items: [
+    { sec: 'Broken · gets fixed', broken: true, color: '#fbbf24', items: [
       { id: 'inside', icon: 'arrow-right-arrow-left', anim: 'flip', name: 'Inside-out cube', note: 'Every face points inward. Auto-fix turns it right way round.', tag: 'Fixable', raw: true, build: () => G.invert(cube()) },
       { id: 'mixed', icon: 'shuffle', anim: 'wiggle', name: 'Mixed-up sphere', note: 'Half of the faces point the wrong way.', tag: 'Fixable', raw: true, build: () => G.flipSome(sph(), 0.5, 9) },
       { id: 'doubled', icon: 'clone', anim: 'pop', name: 'Doubled faces', note: 'Every triangle of a torus is stored twice.', tag: 'Fixable', raw: true, build: () => G.torus(20, 6, 28, 14).concat(G.torus(20, 6, 28, 14)) },
@@ -2934,7 +2936,7 @@ const EX = () => {
       { id: 'wall', icon: 'border-all', anim: 'expand', name: 'Hidden wall', note: 'Two cubes touching: their shared walls trap an interior face.', tag: 'Fixable', raw: true, build: () => G.box(0, 0, 0, 10, 10, 10).concat(G.box(10, 0, 0, 20, 10, 10)) },
       { id: 'junk', icon: 'trash-can', anim: 'shake', name: 'Junk triangles', note: 'A cube plus zero-area and NaN triangles. These are dropped as the file opens.', tag: 'Auto', raw: true, build: () => G.addNaN(G.addDegenerate(cube(), 6), 4) },
     ] },
-    { sec: 'Broken · cannot be fixed', color: '#f87171', items: [
+    { sec: 'Broken · cannot be fixed', broken: true, color: '#f87171', items: [
       { id: 'edge2', icon: 'code-fork', anim: 'wiggle', name: 'Cubes touching on an edge', note: 'Four faces meet on one edge. No safe fix, and the tool points at it.', tag: 'Not fixable', raw: true, build: () => G.box(0, 0, 0, 10, 10, 10).concat(G.box(10, 10, 0, 20, 20, 10)) },
       { id: 'overlap', icon: 'object-group', anim: 'tilt', name: 'Overlapping solids', note: 'Two closed cubes occupy the same space. Needs a boolean union.', tag: 'Not fixable', raw: true, build: () => G.box(0, 0, 0, 10, 10, 10).concat(G.box(5, 5, 5, 15, 15, 15)) },
       { id: 'checker', icon: 'chess-board', anim: 'flip', name: 'Checkerboard voxels', note: 'Cubes touch only along edges, so many edges have 4 faces.', tag: 'Not fixable', raw: true, build: vox },
@@ -2944,7 +2946,8 @@ const EX = () => {
   ];
 };
 function renderExamples() {
-  $('#exBody').innerHTML = EX().map((g) => `<div class="ex-sec" style="--cat:${g.color}">${g.sec}</div><div class="ex-grid">${g.items.map((e) => `<button class="ex hv" style="--cat:${g.color}" data-ex="${e.id}"><div class="h">${ic(e.icon, e.anim)}<span>${e.name}</span></div><p>${e.note}</p><span class="badge ${e.tag === 'Clean' ? 'solid' : 'dash'}" style="justify-self:start">${e.tag}</span></button>`).join('')}</div>`).join('');
+  const note = $('#exModal .note'); if (note && !SHOW_BROKEN_EXAMPLES) note.textContent = 'Sample models that convert cleanly to STEP.';
+  $('#exBody').innerHTML = EX().filter((g) => SHOW_BROKEN_EXAMPLES || !g.broken).map((g) => `<div class="ex-sec" style="--cat:${g.color}">${g.sec}</div><div class="ex-grid">${g.items.map((e) => `<button class="ex hv" style="--cat:${g.color}" data-ex="${e.id}"><div class="h">${ic(e.icon, e.anim)}<span>${e.name}</span></div><p>${e.note}</p><span class="badge ${e.tag === 'Clean' ? 'solid' : 'dash'}" style="justify-self:start">${e.tag}</span></button>`).join('')}</div>`).join('');
   $$('[data-ex]').forEach((b) => (b.onclick = () => { $('#exModal').classList.remove('on'); loadExample(b.dataset.ex); }));
 }
 async function loadExample(id) {
@@ -3683,14 +3686,14 @@ const Tut = (() => {
     { sel: () => (S.mesh ? '#btnOpen' : '#dropzone'), title: 'Load a model', text: 'Drag a 3D file (STL, OBJ, PLY, OFF, 3MF or GLB) anywhere onto the page, or press Open. No file handy? Next will open an example gear for you.', hand: 'tap',
       after: async () => { if (!S.mesh) await loadExample('gear'); } },
     { sel: '#tabs', title: 'Three ways to look', text: 'Solid is the normal view. Wire is a see-through wireframe of the exact faces that will be written to STEP. RTX is a real-time shader render with studio reflections, soft shadows and ambient occlusion.', hand: 'tap', before: () => setMode('solid') },
-    { sel: '#sec-model', title: 'Model & health', text: 'Every problem in the mesh is listed here: holes, flipped faces, duplicates, cracks. Fix each one, or fix everything. Broken examples are in the Examples menu if you want to practice.', before: () => openSection('sec-model') },
+    { sel: '#sec-model', title: 'Model & health', text: 'Every problem in the mesh is listed here: holes, flipped faces, duplicates, cracks. Fix each one, or fix everything.' + (SHOW_BROKEN_EXAMPLES ? ' Broken examples are in the Examples menu if you want to practice.' : ''), before: () => openSection('sec-model') },
     { sel: '#toolSelect', title: 'Select faces', text: 'With the arrow tool, click a face in the model. Hold Shift to add more. Flat faces, holes, shafts and curved surfaces are recognized automatically.', hand: 'tap', before: () => { setTool('select'); } },
     { sel: '#sec-faces', title: 'Color faces', text: 'Use a rule to select many at once: all faces, the same type, the same size or radius, the same direction. Then click a swatch to color them. Colors are saved inside the STEP file.', hand: 'tap', before: () => { openSection('sec-faces'); S.an && S.an.patches[0] && setSelection(S.an.patches.filter((p) => p.group === (S.an.kinds.hole ? 'hole' : 'plane')).map((p) => p.id)); } },
     { sel: '#tools', title: 'Move, rotate, scale', text: 'These tools show a handle on the part. Drag the arrows to move, the rings to rotate (they snap to 45°), or the boxes to scale. The numbers in the panel update live and you can type exact values.', hand: 'tap', before: () => { clearSelection(); openSection('sec-xf'); setTool('move'); } },
     { sel: '#toolSnap', title: 'Snap points & anchor', text: 'Turn on snap points to see face centers, edge centers, hole centers and circle points every 45°. Choose the Anchor tool and click one to rotate or scale around that exact spot. Reset puts the anchor back at the part center.', hand: 'tap', before: () => { setTool('anchor'); } },
     { sel: '#btnConvert2', title: 'Export STEP', text: 'Choose units and output type, then convert. Coplanar triangles are merged into real faces, so a cube becomes 6 faces, not 12. Your moves, rotations and colors are included.', hand: 'tap', before: () => { setTool('select'); setSnap(false); openSection('sec-export'); } },
     { sel: '#btnVerify', title: 'Prove it worked', text: 'Verify re-reads the finished STEP file and checks structure, edge topology, area, volume, size, vertices, units and colors against your original model. Anything wrong is shown on the part.', hand: 'tap', before: () => openSection('sec-verify') },
-    { sel: '#btnExamples', title: 'Practice on broken models', text: 'The Examples menu has models that are broken on purpose. Some get fixed, and some cannot be fixed and show exactly where they fail. The ? button replays this tour any time.', hand: 'tap', before: () => { setTool('select'); } },
+    { sel: '#btnExamples', title: SHOW_BROKEN_EXAMPLES ? 'Practice on broken models' : 'Try an example', text: SHOW_BROKEN_EXAMPLES ? 'The Examples menu has models that are broken on purpose. Some get fixed, and some cannot be fixed and show exactly where they fail. The ? button replays this tour any time.' : 'The Examples menu has sample models you can open with one click. The ? button replays this tour any time.', hand: 'tap', before: () => { setTool('select'); } },
   ];
   const target = (s) => $(typeof s.sel === 'function' ? s.sel() : s.sel);
   async function show(n) {
