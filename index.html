@@ -1009,6 +1009,7 @@ const Core = (() => {
     const diag = Math.hypot(bbox.max[0] - bbox.min[0], bbox.max[1] - bbox.min[1], bbox.max[2] - bbox.min[2]);
     const maxAbs = Math.max(...bbox.min.map(Math.abs), ...bbox.max.map(Math.abs));
     const distTol = Math.max(diag * 1e-5, maxAbs * 2e-7);
+    const areaTol = distTol * distTol * 0.5;
     const cosT = Math.cos(angle * Math.PI / 180);
     const region = new Int32Array(m).fill(-1);
     const planeDist = (n, d0, v) => Math.abs(n[0] * uniq[v * 3] + n[1] * uniq[v * 3 + 1] + n[2] * uniq[v * 3 + 2] - d0);
@@ -1077,7 +1078,10 @@ const Core = (() => {
             ay += uniq[p + 2] * uniq[q] - uniq[p] * uniq[q + 2];
             az += uniq[p] * uniq[q + 1] - uniq[p + 1] * uniq[q];
           }
-          if ((ax * n[0] + ay * n[1] + az * n[2]) / 2 > 0) { outerCount++; outer = li; }
+          const area = (ax * n[0] + ay * n[1] + az * n[2]) / 2;
+          // a loop that revisits a vertex, or that has collapsed to (nearly) a line (slivers merged into one face), makes an invalid B-rep face: keep those regions as plain triangles instead
+          if (Math.abs(area) <= areaTol || new Set(lp).size !== lp.length) { ok = false; break; }
+          if (area > 0) { outerCount++; outer = li; }
         }
         if (outerCount !== 1) ok = false;
       }
