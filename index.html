@@ -535,7 +535,7 @@ aside#panel .pad{padding-left:18px;padding-right:18px}
       </div></div></div>
   </section>
 </main></div>
-<input type="file" id="file" accept=".stl,.obj,.ply,.off,.3mf,.glb,.gltf,model/stl,model/obj,model/gltf-binary,application/sla,application/octet-stream" hidden>
+<input type="file" id="file" accept=".stl,.obj,.ply,.off,.3mf,.glb,.gltf,.zip,model/stl,model/obj,model/gltf-binary,application/sla,application/octet-stream" hidden>
 <div id="dropov"><div><span class="ic" data-a="bob-down"><i class="fa-solid fa-file-arrow-down"></i></span>Drop a 3D file to convert</div></div>
 <div id="busy"><div class="c"><div class="t"><span class="ic" data-a="spin"><i class="fa-solid fa-circle-notch"></i></span><span id="busyT">Working…</span></div><div class="bar"><i id="busyB"></i></div></div></div>
 <div id="toasts"></div>
@@ -2001,7 +2001,7 @@ const Importers = (() => {
   /* ---------------------------------------------------------------- OBJ */
   function parseOBJ(text) {
     const V = [], C = []; let hasCol = false; const tris = [], P = (i) => [V[i * 3], V[i * 3 + 1], V[i * 3 + 2]];
-    for (const raw of text.split('\n')) {
+    for (const raw of text.replace(/\\\r?\n/g, ' ').split('\n')) {
       const line = raw.trim(); if (!line || line.charCodeAt(0) === 35) continue;
       const c0 = line.charCodeAt(0), c1 = line.charCodeAt(1);
       if (c0 === 118 && (c1 === 32 || c1 === 9)) { // "v "
@@ -2118,7 +2118,7 @@ const Importers = (() => {
       }
       const name = td.decode(u8.subarray(p + 46, p + 46 + nl)); p += 46 + nl + xl + cl;
       const ln = dv.getUint16(off + 26, true), lx = dv.getUint16(off + 28, true), start = off + 30 + ln + lx;
-      files.set(name, async () => (method === 0 ? u8.subarray(start, start + csize) : inflateRaw(u8.subarray(start, start + csize))));
+      const get = async () => (method === 0 ? u8.subarray(start, start + csize) : inflateRaw(u8.subarray(start, start + csize))); get.csize = csize; files.set(name, get);
     }
     return files;
   }
@@ -2126,10 +2126,8 @@ const Importers = (() => {
   const matMul = (a, b) => { const r = new Array(16).fill(0); for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) for (let k = 0; k < 4; k++) r[i * 4 + j] += a[i * 4 + k] * b[k * 4 + j]; return r; };
   const parseT3 = (s) => { if (!s) return [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]; const t = s.trim().split(/\s+/).map(Number); return [t[0], t[1], t[2], 0, t[3], t[4], t[5], 0, t[6], t[7], t[8], 0, t[9], t[10], t[11], 1]; }; // row-vector convention
   const hexRgb = (h) => { const m = /^#?([0-9a-f]{6})/i.exec(h || ''); if (!m) return null; const n = parseInt(m[1], 16); return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255]; };
-  async function parse3MF(buf) {
-    const files = await unzip(buf); let name = [...files.keys()].find((k) => /^3D\/3dmodel\.model$/i.test(k)) || [...files.keys()].find((k) => /\.model$/i.test(k));
-    if (!name) throw new Error('No 3D model found inside this 3MF.');
-    const xml = td.decode(await files.get(name)()), unitName = (/<model[^>]*\bunit="([^"]+)"/.exec(xml) || [, 'millimeter'])[1], [uname, uscale] = UNITS[unitName] || ['mm', 1];
+  // one .model part -> its objects and colour palettes
+  function read3MFModel(xml) {
     const palettes = new Map();
     xml.replace(/<(?:\w+:)?basematerials\b([^>]*)>([\s\S]*?)<\/(?:\w+:)?basematerials>/g, (m, a, body) => { const id = attrs(a).id, cols = []; body.replace(/<(?:\w+:)?base\b([^>]*)\/?>/g, (mm, b) => { cols.push(hexRgb(attrs(b).displaycolor)); return mm; }); palettes.set(id, cols); return m; });
     xml.replace(/<(?:\w+:)?colorgroup\b([^>]*)>([\s\S]*?)<\/(?:\w+:)?colorgroup>/g, (m, a, body) => { const id = attrs(a).id, cols = []; body.replace(/<(?:\w+:)?color\b([^>]*)\/?>/g, (mm, b) => { cols.push(hexRgb(attrs(b).color)); return mm; }); palettes.set(id, cols); return m; });
@@ -2138,26 +2136,53 @@ const Importers = (() => {
       const at = attrs(a), o = { id: at.id, pid: at.pid, pindex: at.pindex, verts: [], tris: [], comps: [] };
       body.replace(/<(?:\w+:)?vertex\b([^>]*)\/?>/g, (mm, b) => { const q = attrs(b); o.verts.push(+q.x, +q.y, +q.z); return mm; });
       body.replace(/<(?:\w+:)?triangle\b([^>]*)\/?>/g, (mm, b) => { const q = attrs(b); o.tris.push([+q.v1, +q.v2, +q.v3, q.pid, q.p1]); return mm; });
-      body.replace(/<(?:\w+:)?component\b([^>]*)\/?>/g, (mm, b) => { const q = attrs(b); o.comps.push({ id: q.objectid, t: parseT3(q.transform) }); return mm; });
+      body.replace(/<(?:\w+:)?component\b([^>]*)\/?>/g, (mm, b) => { const q = attrs(b); o.comps.push({ id: q.objectid, path: q.path, t: parseT3(q.transform) }); return mm; });
       objects.set(at.id, o); return m;
     });
+    return { objects, palettes };
+  }
+  async function parse3MF(buf) {
+    const files = await unzip(buf), keys = [...files.keys()];
+    const name = keys.find((k) => /^3D\/3dmodel\.model$/i.test(k)) || keys.find((k) => /\.model$/i.test(k));
+    if (!name) throw new Error('No 3D model found inside this 3MF.');
+    const xml = td.decode(await files.get(name)()), unitName = (/<model[^>]*\bunit="([^"]+)"/.exec(xml) || [, 'millimeter'])[1], [uname, uscale] = UNITS[unitName] || ['mm', 1];
+    const main = read3MFModel(xml), parts = new Map();
+    // Production-extension files (PrusaSlicer, Bambu Studio, Orca, Cura…) keep the real meshes in other .model parts that the build items reach through component p:path
+    for (const k of keys) if (/\.model$/i.test(k) && k !== name) parts.set(k.replace(/^\/+/, '').toLowerCase(), read3MFModel(td.decode(await files.get(k)())));
     const items = []; xml.replace(/<(?:\w+:)?item\b([^>]*)\/?>/g, (m, a) => { const q = attrs(a); items.push({ id: q.objectid, t: parseT3(q.transform) }); return m; });
-    if (!items.length) objects.forEach((o) => { if (o.verts.length) items.push({ id: o.id, t: parseT3() }); });
-    const V = [], tris = [], tcol = []; let anyCol = false;
-    const emit = (o, M, depth) => {
+    if (!items.length) main.objects.forEach((o) => { if (o.verts.length || o.comps.length) items.push({ id: o.id, t: parseT3() }); });
+    const V = [], tris = [], tcol = []; let anyCol = false, missing = 0;
+    const emit = (o, M, depth, model) => {
       if (depth > 8) return;
       const base = V.length / 3;
       for (let i = 0; i < o.verts.length; i += 3) { const x = o.verts[i], y = o.verts[i + 1], z = o.verts[i + 2]; V.push((x * M[0] + y * M[4] + z * M[8] + M[12]) * uscale, (x * M[1] + y * M[5] + z * M[9] + M[13]) * uscale, (x * M[2] + y * M[6] + z * M[10] + M[14]) * uscale); }
       for (const t of o.tris) {
         tris.push(base + t[0], base + t[1], base + t[2]);
-        const pid = t[3] !== undefined ? t[3] : o.pid, pi = t[3] !== undefined ? t[4] : o.pindex, pal = palettes.get(pid), c = pal && pal[+pi || 0];
+        const pid = t[3] !== undefined ? t[3] : o.pid, pi = t[3] !== undefined ? t[4] : o.pindex, pal = model.palettes.get(pid), c = pal && pal[+pi || 0];
         if (c) { anyCol = true; tcol.push(c[0], c[1], c[2]); } else tcol.push(-1, -1, -1);
       }
-      for (const c of o.comps) { const child = objects.get(c.id); if (child) emit(child, matMul(c.t, M), depth + 1); }
+      for (const c of o.comps) {
+        const m2 = c.path ? parts.get(String(c.path).replace(/^\/+/, '').toLowerCase()) : model, child = m2 && m2.objects.get(c.id);
+        if (child) emit(child, matMul(c.t, M), depth + 1, m2); else missing++;
+      }
     };
-    for (const it of items) { const o = objects.get(it.id); if (o) emit(o, it.t, 0); }
+    for (const it of items) { const o = main.objects.get(it.id); if (o) emit(o, it.t, 0, main); }
     const r = need(toSoup(V, tris, null, anyCol ? tcol : null), '3MF');
-    return { ...r, units: uname, zUp: true, format: '3MF', notes: [] };
+    return { ...r, units: uname, zUp: true, format: '3MF', notes: missing ? [`${missing} component(s) pointed at parts that are not in the file and were skipped.`] : [] };
+  }
+  // ZIP archives (Thingiverse "Download all files", slicer bundles): open the model inside
+  const ZIP_MODEL = /\.(stl|obj|ply|off|3mf|glb|gltf)$/i;
+  async function parseZip(buf, depth = 0) {
+    const files = await unzip(buf), keys = [...files.keys()];
+    if (keys.some((k) => /\.model$/i.test(k))) return parse3MF(buf);
+    const found = keys.filter((k) => ZIP_MODEL.test(k) && !/(^|\/)(__MACOSX\/|\._)/.test(k) && !/\/$/.test(k));
+    if (!found.length) throw new Error('This ZIP has no STL, OBJ, PLY, OFF, 3MF or GLB file inside.');
+    found.sort((a, b) => (files.get(b).csize || 0) - (files.get(a).csize || 0));
+    const pick = found[0], bytes = await files.get(pick)(), ab = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+    if (depth > 0) throw new Error('This ZIP contains another ZIP. Unzip it first.');
+    const r = await parse(ab, pick.split('/').pop(), depth + 1);
+    r.notes = (r.notes || []).concat(found.length > 1 ? [`Opened "${pick}" (the largest of ${found.length} model files in the ZIP). Unzip it to open the others one at a time.`] : [`Opened "${pick}" from the ZIP.`]);
+    return r;
   }
 
   /* ----------------------------------------------------------- glTF / GLB */
@@ -2223,7 +2248,7 @@ const Importers = (() => {
   }
 
   /* ------------------------------------------------------------ dispatcher */
-  async function parse(buffer, fileName = 'model') {
+  async function parse(buffer, fileName = 'model', zipDepth = 0) {
     const ext = extOf(fileName), u8 = new Uint8Array(buffer, 0, Math.min(buffer.byteLength, 512)), head = td.decode(u8);
     if (EXT_HELP[ext]) throw new Error(EXT_HELP[ext]);
     const C = getCore(), stl = () => ({ soup: C.parseSTL(buffer), triColors: null, units: null, zUp: null, format: 'STL', notes: [] });
@@ -2234,16 +2259,17 @@ const Importers = (() => {
       case 'ply': return parsePLY(buffer);
       case 'off': return parseOFF(td.decode(buffer));
       case '3mf': return parse3MF(buffer);
+      case 'zip': return parseZip(buffer, zipDepth);
       case 'glb': return parseGLB(buffer);
       case 'gltf': return parseGLTF(JSON.parse(td.decode(buffer)), null, false);
     }
-    if (isGlb) return parseGLB(buffer); if (isPly) return parsePLY(buffer); if (isZip) return parse3MF(buffer);
+    if (isGlb) return parseGLB(buffer); if (isPly) return parsePLY(buffer); if (isZip) return parseZip(buffer, zipDepth);
     if (/^\s*[CN]?OFF\b/i.test(head)) return parseOFF(td.decode(buffer));
     if (/^\s*\{/.test(head) && /"asset"/.test(td.decode(new Uint8Array(buffer, 0, Math.min(buffer.byteLength, 4000))))) return parseGLTF(JSON.parse(td.decode(buffer)), null, false);
     if (/^\s*(#|mtllib|o |g |v )/m.test(head) && /^\s*v\s+[-\d.]/m.test(head) && !/facet\s+normal/i.test(head)) return parseOBJ(td.decode(buffer));
     return stl();
   }
-  return { parse, parseOBJ, parsePLY, parseOFF, parse3MF, parseGLB, parseGLTF, extOf, EXT_HELP, SUPPORTED: ['stl', 'obj', 'ply', 'off', '3mf', 'glb', 'gltf'] };
+  return { parse, parseOBJ, parsePLY, parseOFF, parse3MF, parseGLB, parseGLTF, extOf, EXT_HELP, SUPPORTED: ['stl', 'obj', 'ply', 'off', '3mf', 'glb', 'gltf', 'zip'] };
 })();
 if (typeof module !== 'undefined') module.exports = Importers;
 
