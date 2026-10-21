@@ -318,6 +318,12 @@ select.native{position:absolute;opacity:0;pointer-events:none;width:0;height:0}
 
 /* ---------- CSS-only tooltips (data-tip) ---------- */
 [data-tip]{position:relative}
+[data-tip]::after{translate:var(--tip-dx,0px) var(--tip-dy,0px)}
+/* tipfit.js: a tip that would run off the screen edge is nudged back, or flipped to the other side */
+[data-tip-flip=down]::after{bottom:auto!important;top:calc(100% + 9px)!important}
+[data-tip-flip=down]::before{bottom:auto!important;top:calc(100% + 4px)!important;border-top:0!important;border-bottom:5px solid #fff!important}
+[data-tip-flip=up]::after{top:auto!important;bottom:calc(100% + 9px)!important}
+[data-tip-flip=up]::before{top:auto!important;bottom:calc(100% + 4px)!important;border-bottom:0!important;border-top:5px solid #fff!important}
 [data-tip]::after,[data-tip]::before{position:absolute;pointer-events:none;opacity:0;visibility:hidden;z-index:500;transition:opacity .15s,transform .2s var(--ease),visibility 0s .15s}
 [data-tip]::after{content:attr(data-tip);left:50%;bottom:calc(100% + 9px);transform:translate(-50%,4px);background:#fff;color:#000;font:600 12px/1.2 Inter,sans-serif;font-style:normal;text-transform:none;letter-spacing:0;padding:6px 10px;border-radius:7px;white-space:nowrap;box-shadow:0 8px 24px rgba(0,0,0,.5)}
 [data-tip]::before{content:"";left:50%;bottom:calc(100% + 4px);transform:translate(-50%,4px);border:5px solid transparent;border-top-color:#fff;border-bottom:0}
@@ -482,7 +488,7 @@ aside#panel .pad{padding-left:18px;padding-right:18px}
 <label class="chk"><input type="checkbox" id="vSmooth" checked>Smooth shading</label>
 <label class="chk"><input type="checkbox" id="vEdges">Show sharp edges</label>
 <label class="chk"><input type="checkbox" id="vGrid" checked>Floor grid</label>
-<label class="chk"><input type="checkbox" id="vSpin">Auto-rotate</label>
+
 <label class="f" id="wireWrap"><span class="l">Wireframe shows</span><div id="vWireHost"></div><select id="vWire" class="native"><option value="faces">STEP faces (what gets exported)</option><option value="tris">Every triangle</option></select></label>
 <button class="btn sm hv" id="btnShot3d"><span class="ic" data-a="shutter"><i class="fa-solid fa-camera"></i></span><span>Save screenshot</span></button>
 </div></div></div></div></section><section class="sec open" id="sec-shade" data-modes="rt"><div class="w"><button class="sec-h hv" data-toggle><span class="ic" data-a="spin"><i class="fa-solid fa-sun"></i></span><span>Shader lighting</span><span class="ic chev" data-a=""><i class="fa-solid fa-chevron-down"></i></span></button><div class="sec-b"><div class="in"><div class="pad">
@@ -3269,7 +3275,7 @@ async function setMode(mode, force) {
   applyModeVisibility(m);
   $('#wireWrap').style.display = m === 'wire' ? '' : 'none';
   applyOverlays(); updateTool(); applyRTX();
-  if (m !== '2d') controls.autoRotate = $('#vSpin').checked;
+  controls.autoRotate = false;   /* never spins by itself */
   if (m === '2d') Sheet.fit();
 }
 
@@ -3951,7 +3957,6 @@ function boot() {
     $('#csRev').onchange = (e) => { S.cs.rev = e.target.checked; rebuildColors(); }; csUi(); }
   $('#healthPill').onclick = () => openSection('sec-model');
   $('#vEdges').onchange = applyOverlays; $('#vGrid').onchange = (e) => setGrid(e.target.checked); $('#btnGrid').onclick = () => setGrid(!$('#vGrid').checked); $('#vWire').onchange = applyOverlays;
-  $('#vSpin').onchange = (e) => { controls.autoRotate = e.target.checked; controls.autoRotateSpeed = 1.6; };
   // faces + transform
   $('#selRule').onchange = () => { const v = $('#selRule').value; if (!v) return; applyRule(v); $('#selRule').value = ''; $('#selRule').__dd.sync(); };
   $('#btnPaint').onclick = () => paintSelection($('#paintColor').value); $('#btnUnpaint').onclick = unpaintSelection; $('#btnUnpaintAll').onclick = unpaintAll;
@@ -4013,5 +4018,6 @@ if (location.hash === '#debug') window.__app = { Hist, Rep, S, Core, Sheet, came
 })();
 </script>
 <footer class="foot"><span>3D File to STEP File is released under GitHub’s <a href="https://github.com/github/choosealicense.com/blob/gh-pages/_licenses/cc0-1.0.txt" target="_blank" rel="license noopener noreferrer">Creative Commons Zero v1.0 Universal</a> license. All rights reserved.</span></footer>
+<script src="tipfit.js?v=1"></script>
 </body>
 </html>
