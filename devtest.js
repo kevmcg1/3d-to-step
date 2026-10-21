@@ -6,6 +6,9 @@
    (blank 3D view, clipped or covered controls, contrast, jank), then tells you what
    went right and wrong, with how to reproduce each problem and a guess at the cause.
    Seeded: the same seed gives the same sequence of actions.
+   Modes: Quick, Standard and Thorough follow a plan (every control, pairs, random runs, whole flows) with a percentage bar and a finishing time;
+   "Aim at problems" remembers what broke before, replays it, hunts around the likeliest suspects and shrinks each failure to its shortest recipe;
+   "Free run" is the original open-ended mode. Runs keep going when the tab is in the background, and time can be sped up (10 or more actions a second).
    ===================================================================== */
 (() => {
 'use strict';
@@ -16,8 +19,58 @@ const S = A.S;
 const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const raf = () => new Promise((r) => requestAnimationFrame(() => r()));
-const now = () => performance.now();
+const NOW = performance.now.bind(performance);   // the real clock: while a run is on, the page's own performance.now() can be sped up
+const now = NOW;
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+
+
+/* ---------------------------------------------------------------- keep running in the background, and speed
+   A hidden tab gets no animation frames and its timers are held to one a second, so a run would crawl the moment you switched away. While a run
+   is on, timers go through a Web Worker (its clock is not throttled), a frame request the browser does not answer while the page is hidden is
+   answered from that clock, and a Web Lock keeps the browser from freezing the tab. `speed` runs the page's clock that many times faster so
+   animations finish sooner; from 10x up, frames also come from the worker clock instead of waiting for the display. */
+const BG = (() => {
+  const native = { st: window.setTimeout, ct: window.clearTimeout, raf: window.requestAnimationFrame, caf: window.cancelAnimationFrame };
+  let worker = null, nextId = 1, on = false, release = null, wasHidden = 0, K = 1, T0 = 0;
+  const waits = new Map(), frames = new Map(), BASE = 1e9;
+  const startWorker = () => {
+    if (worker) return true;
+    try {
+      const url = URL.createObjectURL(new Blob(['self.onmessage=function(e){var d=e.data;setTimeout(function(){self.postMessage(d.id)},d.ms)}'], { type: 'text/javascript' }));
+      worker = new Worker(url); worker.onmessage = (e) => { const f = waits.get(e.data); if (f) { waits.delete(e.data); f(); } }; worker.onerror = () => { worker = null; };
+      return true;
+    } catch (e) { worker = null; return false; }
+  };
+  const wait = (fn, ms) => { const id = nextId++; waits.set(id, fn); worker.postMessage({ id, ms }); return id; };
+  const fast = () => T0 + (NOW() - T0) * K;
+  const timeout = function (fn, ms) { const a = Array.prototype.slice.call(arguments, 2); if (typeof fn !== 'function' || !worker) return native.st.apply(window, arguments); return BASE + wait(() => fn.apply(window, a), Math.max(0, (+ms || 0) / K)); };
+  const clear = (id) => { if (id >= BASE) waits.delete(id - BASE); else native.ct.call(window, id); };
+  const frame = (cb) => {
+    if (!worker) return native.raf.call(window, cb);
+    const id = nextId++; let done = false, nat = 0;
+    if (K >= 10) { wait(() => { if (done) return; done = true; frames.delete(id); cb(performance.now()); }, 4); frames.set(id, () => { done = true; }); return BASE + id; }
+    const run = () => { if (done) return; done = true; frames.delete(id); if (nat) native.caf.call(window, nat); cb(performance.now()); };
+    nat = native.raf.call(window, run);
+    const tick = () => { if (done) return; if (document.hidden) { wasHidden++; run(); } else wait(tick, 50); }; wait(tick, 34);
+    frames.set(id, () => { done = true; native.caf.call(window, nat); });
+    return BASE + id;
+  };
+  const cancelFrame = (id) => { if (id >= BASE) { const c = frames.get(id - BASE); if (c) c(); frames.delete(id - BASE); } else native.caf.call(window, id); };
+  return {
+    start(speed) {
+      if (on) return; on = true; wasHidden = 0; K = Math.max(1, Math.min(40, +speed || 1)); T0 = NOW();
+      if (startWorker()) { window.setTimeout = timeout; window.clearTimeout = clear; window.requestAnimationFrame = frame; window.cancelAnimationFrame = cancelFrame; if (K > 1) performance.now = fast; }
+      try { if (navigator.locks) navigator.locks.request('devtest-run', { mode: 'shared' }, () => new Promise((r) => { release = r; })).catch(() => {}); } catch (e) { /* ignore */ }
+    },
+    stop() {
+      if (!on) return; on = false;
+      try { delete performance.now; } catch (e) { /* ignore */ }
+      window.setTimeout = native.st; window.clearTimeout = native.ct; window.requestAnimationFrame = native.raf; window.cancelAnimationFrame = native.caf;
+      if (release) { release(); release = null; }
+    },
+    get active() { return on; }, get speed() { return K; }, get hiddenFrames() { return wasHidden; }, get turbo() { return K >= 10; },
+  };
+})();
 
 /* ---------------------------------------------------------------- random */
 function mulberry32(a) { return () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
@@ -27,6 +80,7 @@ function wpick(items, w) { let t = 0; const ws = items.map((x, i) => (t += Math.
 
 /* ---------------------------------------------------------------- state */
 const T = {
+  live: { phase: '', scenario: '', stage: 'idle', kind: '', ctl: '', desc: '', diff: null, ms: 0, fmax: 0, fAvg: 0, cats: [], trace: [] },
   open: false, running: false, paused: false, seed: 1, rate: 10, max: 0, n: 0, sub: 0, t0: 0, tRun: 0, endReason: '',
   pass: 0, fail: 0, warn: 0, checks: new Map(),       // checks: name -> {runs, bad}
   kinds: new Map(),                                    // action kind -> {n, bad, ms:[], jank}
@@ -34,6 +88,7 @@ const T = {
   cover: new Map(),                                    // control key -> {n, bad, label, kind}
   pairs: new Set(), lastKey: '', features: new Map(),
   downloads: [], blobs: new Map(), counters: { filePickerBlocked: 0, externalBlocked: 0, dialogs: 0, healed: 0, rejectedOk: 0, loadedOk: 0 },
+  hits: 0, soft: 0, spec: {}, scenario: null, mode: 'free', plan: null, speed: 10,
   errs: [], toasts: [], toastSeq: 0, shifts: 0, longtasks: [], dts: [], base: 16, heap0: 0, mem0: null, lastRate: 0, rateWin: [], blank: 0, offscreen: 0, thumbs: 0,
 };
 const sevRank = { error: 3, warn: 2, info: 1 };
@@ -53,9 +108,11 @@ function find(kind, sev, msg, extra = {}) {
   if (!it) {
     if (T.issues.size > 600) return;
     it = { sig, kind, sev, msg: String(msg).slice(0, 400), count: 0, first: T.n, last: T.n, ctl: new Set(), actions: new Set(), repro: T.recent.slice(-12), seed: T.seed, state: dumpState(), diag: extra.diag || diagnose(kind, msg, extra), thumb: extra.thumb === false ? null : (kind.startsWith('visual') || kind === 'blank' ? snap() : null), stack: extra.stack || '' };
+    it.trail = T.scenario ? T.scenario.slice() : null; it.key = sig;
     T.issues.set(sig, it); logLine(sev === 'error' ? 'bad' : 'warn', `#${T.n} ${kind}: ${it.msg}`);
   }
-  it.count++; it.last = T.n; if (T.cur) { it.actions.add(T.cur.kind); if (T.cur.ctl) it.ctl.add(T.cur.ctl); }
+  it.count++; it.last = T.n; if (sev === 'error') T.hits++; else if (sev === 'warn' && !/^(jank|slow|layout-shift|leak)$/.test(kind)) T.soft++;
+  if (T.cur) { it.actions.add(T.cur.kind); if (T.cur.ctl) it.ctl.add(T.cur.ctl); }
   if (sevRank[sev] > sevRank[it.sev]) it.sev = sev;
   if (T.cur) T.cur.bad.push(kind);
   return it;
@@ -134,7 +191,7 @@ function hook() {
 function unhook() { HK.undo.reverse().forEach((f) => { try { f(); } catch (e) { /* ignore */ } }); HK.undo = []; HK.on = false; }
 // frame monitor: how long between frames, so a stall shows up as a long gap
 const FM = { on: false, last: 0, max: 0 };
-function fmLoop(t) { if (!FM.on) return; if (FM.last) { const dt = t - FM.last; T.dts.push(dt); if (T.dts.length > 900) T.dts.shift(); if (dt > FM.max) FM.max = dt; } FM.last = t; requestAnimationFrame(fmLoop); }
+function fmLoop() { if (!FM.on) return; const t = NOW(); if (FM.last) { const dt = t - FM.last; T.dts.push(dt); if (T.dts.length > 900) T.dts.shift(); if (dt > FM.max) FM.max = dt; } FM.last = t; requestAnimationFrame(fmLoop); }
 
 /* ---------------------------------------------------------------- the page's controls */
 const root = () => $('#devtest');
@@ -245,7 +302,7 @@ function toBinSTL(m) { const buf = new ArrayBuffer(84 + 50 * m.f.length), dv = n
 function toOBJ(m) { return m.v.map((p) => 'v ' + p.join(' ')).join('\n') + '\n' + m.f.map((t) => 'f ' + t.map((i) => i + 1).join(' ')).join('\n') + '\n'; }
 function toPLY(m) { return `ply\nformat ascii 1.0\nelement vertex ${m.v.length}\nproperty float x\nproperty float y\nproperty float z\nelement face ${m.f.length}\nproperty list uchar int vertex_indices\nend_header\n` + m.v.map((p) => p.join(' ')).join('\n') + '\n' + m.f.map((t) => '3 ' + t.join(' ')).join('\n') + '\n'; }
 function toOFF(m) { return `OFF\n${m.v.length} ${m.f.length} 0\n` + m.v.map((p) => p.join(' ')).join('\n') + '\n' + m.f.map((t) => '3 ' + t.join(' ')).join('\n') + '\n'; }
-function makeFile() {
+function makeFile(force) {
   const sz = () => rf(0.5, 80), shapes = {
     cube: () => meshBox(0, 0, 0, sz(), sz(), sz()), sphere: () => meshSphere(ri(4, 18), ri(5, 24), rf(1, 40)),
     twoCubes: () => meshCombine([meshBox(0, 0, 0, 10, 10, 10), meshBox(20, 0, 0, 10, 10, 10)]),
@@ -264,9 +321,10 @@ function makeFile() {
     wrongExt: () => ['image.png', Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13])], badObj: () => ['bad.obj', 'v 1 2\nf 1 2 3 4 5\nf a b c\n'], badPly: () => ['bad.ply', 'ply\nformat ascii 1.0\nelement vertex 99999999\nend_header\n1 2 3\n'],
     huge: () => ['big.obj', 'v 0 0 0\n'.repeat(20000)], 
   };
-  if (chance(0.12)) { const nm = pick(['x'.repeat(240) + '.stl', '<img src=x onerror=alert(1)>.stl', 'sp ace & (odd) #name%20.stl', 'ünï©ödé 日本.stl']); return { name: nm, file: new File([toAsciiSTL(meshBox(0, 0, 0, 5, 5, 5))], nm), expect: 'either', what: 'odd file name' }; }
-  if (chance(0.3)) { const k = pick(Object.keys(bad)), [name, data] = bad[k](); return { name, file: new File([data], name), expect: 'reject', what: k }; }
-  const sk = pick(Object.keys(shapes)), m = shapes[sk](), fmt = pick(['stl', 'bstl', 'obj', 'ply', 'off']);
+  if (force && force.bad) { const k = force.bad === true ? pick(Object.keys(bad)) : force.bad, [name, data] = bad[k](); return { name, file: new File([data], name), expect: 'reject', what: k }; }
+  if (!force && chance(0.12)) { const nm = pick(['x'.repeat(240) + '.stl', '<img src=x onerror=alert(1)>.stl', 'sp ace & (odd) #name%20.stl', 'ünï©ödé 日本.stl']); return { name: nm, file: new File([toAsciiSTL(meshBox(0, 0, 0, 5, 5, 5))], nm), expect: 'either', what: 'odd file name' }; }
+  if (!force && chance(0.3)) { const k = pick(Object.keys(bad)), [name, data] = bad[k](); return { name, file: new File([data], name), expect: 'reject', what: k }; }
+  const sk = force && force.shape && shapes[force.shape] ? force.shape : pick(Object.keys(shapes)), m = shapes[sk](), fmt = force && force.fmt ? force.fmt : pick(['stl', 'bstl', 'obj', 'ply', 'off']);
   const name = `dt-${sk}.${fmt === 'bstl' ? 'stl' : fmt}`, data = fmt === 'stl' ? toAsciiSTL(m) : fmt === 'bstl' ? toBinSTL(m) : fmt === 'obj' ? toOBJ(m) : fmt === 'ply' ? toPLY(m) : toOFF(m);
   const degenerate = /^(flat|tiny|huge)$/.test(sk);
   return { name, file: new File([data], name), expect: degenerate ? 'either' : 'load', what: sk + '.' + fmt };
@@ -410,6 +468,7 @@ const feature = (n) => T.features.set(n, (T.features.get(n) || 0) + 1);
 /* ---------------------------------------------------------------- actions */
 const TEXTS = ['', ' ', 'part', 'My Part 2', '<img src=x onerror=alert(1)>', '<b>bold</b>', '"quote\'s"', 'x'.repeat(3000), '日本語のテスト', '😀🔩', '../../etc/passwd', 'a;b,c|d', '-1', '1e309', 'NaN', '0'.repeat(400)];
 const NUMS = ['', '0', '-0', '1', '-1', '0.5', '45', '90', '180', '359.99', '360', '-360', '1000', '1e6', '1e12', '-1e12', '0.0000001', '1.', '.5', '1,5', 'abc', '+', 'e', '999999999999999999999'];
+const FUZZ = ['1e-300', '1e300', '-0', '0.0000001', '9'.repeat(30), '1/0', '1,5,5', '1e', 'e5', '--5', '5 5', '0x10', '1_000', '   ', '\u0663', '\u0000', '.', '-.', '+', '1e999', '-1e999', '90.00000000001', '359.99999999', '0.00001', '1e-12', '99999999', '-99999999', '<b>x</b>', 'NaN', 'Infinity'];
 const COLORS = () => '#' + ((rng() * 0xffffff) | 0).toString(16).padStart(6, '0');
 async function aClick(c) {
   const o = {}; const r = rng(); if (r < 0.04) o.shift = true; else if (r < 0.07) o.ctrl = true; else if (r < 0.09) o.button = 2;
@@ -419,8 +478,8 @@ async function aForm(c) {
   const el = c.el; const k = c.k; let d = '';
   if (k === 'select') { const opts = [...el.options]; const o = pick(opts); setValue(el, o.value); el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); d = o.text; }
   else if (k === 'range') { const mn = +el.min || 0, mx = +el.max || 100, st = +el.step || 1; const v = pick([mn, mx, (mn + mx) / 2, mn + Math.round(rf(0, (mx - mn) / st)) * st, mn - 1, mx + 1]); setValue(el, String(v)); el.dispatchEvent(new Event('input', { bubbles: true })); if (chance(0.6)) el.dispatchEvent(new Event('change', { bubbles: true })); d = String(v); }
-  else if (k === 'number') { const v = chance(0.5) ? pick(NUMS) : String(rf(-500, 500).toFixed(ri(0, 4))); el.focus && el.focus({ preventScroll: true }); setValue(el, v); el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); if (chance(0.5)) el.blur(); d = v; }
-  else if (k === 'text') { const v = pick(TEXTS); el.focus && el.focus({ preventScroll: true }); setValue(el, v); el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); if (chance(0.5)) el.blur(); d = v.slice(0, 30); }
+  else if (k === 'number') { const v = T.spec.fuzz && chance(0.6) ? pick(FUZZ) : chance(0.5) ? pick(NUMS) : String(rf(-500, 500).toFixed(ri(0, 4))); el.focus && el.focus({ preventScroll: true }); setValue(el, v); el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); if (chance(0.5)) el.blur(); d = v; }
+  else if (k === 'text') { const v = T.spec.fuzz && chance(0.6) ? pick(FUZZ.concat(TEXTS)) : pick(TEXTS); el.focus && el.focus({ preventScroll: true }); setValue(el, v); el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); if (chance(0.5)) el.blur(); d = v.slice(0, 30); }
   else if (k === 'color') { const v = COLORS(); setValue(el, v); el.dispatchEvent(new Event('input', { bubbles: true })); if (chance(0.5)) el.dispatchEvent(new Event('change', { bubbles: true })); d = v; }
   else if (k === 'check') { await realClick(el); d = el.checked ? 'on' : 'off'; }
   else if (k === 'dropdown') {
@@ -457,15 +516,15 @@ const KEYS = [['z', { ctrl: 1 }], ['y', { ctrl: 1 }], ['z', { ctrl: 1, shift: 1 
 function aKey() { const [k, o] = pick(KEYS); const tgt = chance(0.3) ? view() : document.activeElement && !inDev(document.activeElement) ? document.activeElement : document.body; key(k, o || {}, tgt); return (o && o.ctrl ? 'Ctrl+' : '') + (o && o.shift ? 'Shift+' : '') + (k === ' ' ? 'Space' : k); }
 async function aExample() {
   const all = A.EX().flatMap((g) => g.items.map((e) => ({ id: e.id, tag: e.tag, name: e.name })));
-  const ex = pick(all), before = S.mesh;
+  const ex = (T.spec.example && all.find((e) => e.id === T.spec.example)) || pick(all), before = S.mesh;
   if (chance(0.4)) { const b = $('#btnExamples'); if (b) { await realClick(b); await raf(); const it = $(`[data-ex="${ex.id}"]`); if (it && visible(it)) await realClick(it); else await A.loadExample(ex.id); } else await A.loadExample(ex.id); } else await A.loadExample(ex.id);
   await settle(20000);
   if (!check('examples open a model', !!S.mesh && (S.mesh !== before || !before))) find('silent', 'error', `Opening the example "${ex.name}" produced no model`, { where: ex.id });
   else { feature('examples opened'); T.features.set('example: ' + ex.name, (T.features.get('example: ' + ex.name) || 0) + 1); }
   return ex.name;
 }
-async function aDrop() {
-  const f = makeFile(), before = S.mesh, beforeName = S.name, t0 = T.toastSeq;
+async function aDrop(force) {
+  const f = makeFile(force), before = S.mesh, beforeName = S.name, t0 = T.toastSeq;
   T.quiet = f.expect !== 'load';
   const dt = new DataTransfer(); dt.items.add(f.file);
   window.dispatchEvent(new DragEvent('dragenter', { dataTransfer: dt, bubbles: true, cancelable: true })); window.dispatchEvent(new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true }));
@@ -505,33 +564,53 @@ const MACROS = {
   async 'transform stress'() { if (!S.mesh) { await A.loadExample('gear'); await settle(20000); } for (const k of ['g', 'r', 's', 'v']) { key(k, {}, document.body); await aCanvas(); await aCanvas(); } const fields = scan().filter((c) => c.k === 'number'); for (let i = 0; i < 6 && fields.length; i++) await aForm(pick(fields)); await aHistory(); },
   async 'drop burst'() { for (let i = 0; i < 3; i++) await aDrop(); },
 };
-async function aMacro() { const name = pick(Object.keys(MACROS)); T.sub++; await MACROS[name](); feature('macro: ' + name); return name; }
+async function aMacro(forced) { const name = forced && MACROS[forced] ? forced : pick(Object.keys(MACROS)); T.sub++; await MACROS[name](); feature('macro: ' + name); return name; }
 
 const KINDS = [
-  ['click', 38, async (st) => { const c = wpick(st.list.filter((q) => q.k === 'button' || q.k === 'link' || q.k === 'dropdown'), (q) => 1 / Math.pow(1 + (T.cover.get(q.key) ? T.cover.get(q.key).n : 0), 1.2)); if (!c) return null; T.cur.ctl = c.key; T.cur.desc = 'click ' + c.key; await aClick(c); note(c.key, c.key, c.k, false); return c.key; }],
-  ['form', 18, async (st) => { const c = wpick(st.list.filter((q) => ['select', 'range', 'number', 'text', 'color', 'check', 'dropdown'].includes(q.k)), (q) => 1 / Math.pow(1 + (T.cover.get(q.key) ? T.cover.get(q.key).n : 0), 1.2)); if (!c) return null; T.cur.ctl = c.key; const d = await aForm(c); T.cur.desc = `${c.k} ${c.key} = ${d}`; note(c.key, c.key, c.k, false); return c.key; }],
+  ['click', 38, async (st) => { const c = T.spec.ctl ? st.list.find((q) => q.key === T.spec.ctl) : wpick(st.list.filter((q) => q.k === 'button' || q.k === 'link' || q.k === 'dropdown'), (q) => 1 / Math.pow(1 + (T.cover.get(q.key) ? T.cover.get(q.key).n : 0), 1.2)); if (!c) return null; T.cur.ctl = c.key; T.cur.desc = 'click ' + c.key; await aClick(c); note(c.key, c.key, c.k, false); return c.key; }],
+  ['form', 18, async (st) => { const c = T.spec.ctl ? st.list.find((q) => q.key === T.spec.ctl) : wpick(st.list.filter((q) => ['select', 'range', 'number', 'text', 'color', 'check', 'dropdown'].includes(q.k)), (q) => 1 / Math.pow(1 + (T.cover.get(q.key) ? T.cover.get(q.key).n : 0), 1.2)); if (!c) return null; T.cur.ctl = c.key; const d = await aForm(c); T.cur.desc = `${c.k} ${c.key} = ${d}`; note(c.key, c.key, c.k, false); return c.key; }],
   ['canvas', 20, async () => { const d = await aCanvas(); T.cur.desc = 'mouse ' + d; return null; }],
   ['key', 8, async () => { const d = aKey(); T.cur.desc = 'key ' + d; return null; }],
   ['example', 5, async () => { const d = await aExample(); T.cur.desc = 'open example ' + d; return null; }],
-  ['drop', 4, async () => { const d = await aDrop(); T.cur.desc = 'drop file ' + d; return null; }],
+  ['drop', 4, async () => { const d = await aDrop(T.spec.file); T.cur.desc = 'drop file ' + d; return null; }],
   ['history', 3, async () => { const d = await aHistory(); T.cur.desc = d; return null; }],
   ['export', 2, async () => { const d = await aExport(); T.cur.desc = d; return null; }],
-  ['macro', 2, async () => { const d = await aMacro(); T.cur.desc = 'macro: ' + d; return null; }],
+  ['macro', 2, async () => { const d = await aMacro(T.spec.macro); T.cur.desc = 'macro: ' + d; return null; }],
+  ['setup', 0, async () => { const d = await aSetup(T.spec.name); T.cur.desc = 'start from ' + d; return null; }],
 ];
 
+
+/* ---------------------------------------------------------------- what is being tested right now */
+const CATS = [['errors', /^(js-error|promise|console-error|resource)$/, 'no script errors, rejected promises or console errors'], ['state', /^state$/, 'the camera, model, history, mode and tool all agree with the controls'], ['3D view', /^(blank|visual-offscreen)$/, 'the 3D view is not blank and the model stays in view'], ['layout', /^visual-/, 'nothing is covered, clipped, off-screen or unreadable'], ['STEP output', /^step-invalid$/, 'an exported STEP file is well formed'], ['messages', /^(toast-error|silent|xss|stuck-busy)$/, 'the app gave feedback, showed no unexpected error, and was never stuck busy'], ['smoothness', /^(jank|freeze|layout-shift)$/, 'no long freezes or jumping layout'], ['speed', /^slow$/, 'the action finished promptly'], ['memory', /^leak$/, 'GPU and JS memory stay bounded']];
+function stateParts() {
+  try {
+    const h = A.Hist.info(), m = S.mesh, c = A.camera.position, pv = A.pivot;
+    return { 'model': (S.name || '-') + (m ? ' (' + m.m + ' triangles)' : ''), 'mode / tool / finish': S.mode + ' / ' + S.tool + ' / ' + S.mat, 'history step': (h.i + 1) + '/' + h.n, 'selection': S.sel && S.sel.size != null ? S.sel.size : 0, 'camera': [c.x, c.y, c.z].map((v) => +v.toFixed(2)).join(','), 'model transform': [pv.position.x, pv.position.y, pv.position.z, pv.scale.x, pv.rotation.x, pv.rotation.y].map((v) => +v.toFixed(3)).join(','), 'busy overlay': !!($('#busy') && $('#busy').classList.contains('on')), 'dialog open': !!$('.modal.on'), 'toasts': T.toastSeq };
+  } catch (e) { return {}; }
+}
+const diffParts = (a, b) => Object.keys(b).filter((k) => a && a[k] !== b[k]);
+const PURPOSE = { click: 'press the button and check it does its job (or nothing) without breaking the model, the 3D view, history or layout', form: 'set the control the way a person (or a careless one) would and check the app applies it or refuses it politely, never producing NaN or a frozen page', canvas: 'perform the mouse or touch gesture on the 3D view and check the camera, model and drawing stay valid', key: 'press the key and check the shortcut does what it says (or nothing)', example: 'open an example model and check it loads, draws and can be edited', drop: 'drop a generated file (good, odd or broken) on the page and check it opens, or is refused with a clear message', history: 'undo several steps then redo them and check the history comes back to the same place', export: 'export the model to STEP and check the file is well formed (header, footer, no NaN)', macro: 'run a whole journey of connected steps with checks along the way', setup: 'put the app into a risky starting state before the next actions run' };
+
 /* ---------------------------------------------------------------- one test */
-async function oneAction() {
-  T.n++; const n = T.n;
+async function oneAction(spec) {
+  const outer = rng, aseed = spec && spec.seed != null ? spec.seed >>> 0 : Math.floor(outer() * 4294967296);
+  rng = mulberry32(aseed); T.spec = spec || {};   // every action draws from its own seeded stream, so (kind, control, seed) replays it
+  try { return await oneAction0(aseed); } finally { rng = outer; T.spec = {}; }
+}
+async function oneAction0(aseed) {
+  T.n++; const n = T.n; const spec = T.spec;
   heal();
   const st = { list: scan() }; seenControls(st.list);
-  let kind = wpick(KINDS, (k) => k[1] * (!S.mesh && (k[0] === 'history' || k[0] === 'canvas') ? 0.25 : 1)), cur = T.cur = { n, kind: kind[0], desc: kind[0], ctl: '', bad: [] };
+  let kind = spec.kind ? KINDS.find((k) => k[0] === spec.kind) : wpick(KINDS, (k) => k[1] * (!S.mesh && (k[0] === 'history' || k[0] === 'canvas') ? 0.25 : 1)), cur = T.cur = { n, kind: kind[0], desc: kind[0], ctl: '', bad: [], seed: aseed };
+  const stepRec = { kind: kind[0], seed: aseed }; if (spec.ctl) stepRec.ctl = spec.ctl; for (const k of ['name', 'file', 'macro', 'example', 'fuzz']) if (spec[k] !== undefined) stepRec[k] = spec[k]; if (T.scenario) T.scenario.push(stepRec); T.scenarioCtl = stepRec;
   // tester load when nothing is open: most actions mean little without a model
-  if (!S.mesh && chance(0.5)) { kind = KINDS.find((k) => k[0] === 'example'); cur.kind = 'example'; }
+  if (!spec.kind && !S.mesh && chance(0.5)) { kind = KINDS.find((k) => k[0] === 'example'); cur.kind = 'example'; }
+  const before = stateParts(); T.live.stage = 'doing it'; T.live.ctl = spec.ctl || ''; T.live.kind = kind[0]; T.live.desc = kind[0]; T.live.diff = null; T.live.cats = [];
   const tt0 = T.toastSeq, sh0 = T.shifts, lt0 = T.longtasks.length, t0 = now();
   FM.max = 0; T.expectedErrToasts = false; const dl0 = T.downloads.length;
   try { await kind[2](st); } catch (e) { find('js-error', 'error', 'Action threw: ' + (e && e.message), { stack: e && e.stack }); }
-  const ok = await settle(kind[0] === 'export' ? 60000 : 15000);
-  await raf(); await sleep(30);
+  T.live.stage = 'settling'; const ok = await settle(kind[0] === 'export' ? 60000 : 15000);
+  await raf(); if (!BG.turbo) await sleep(30);
   const ms = now() - t0;
   // oracles
   const ks = T.kinds.get(cur.kind) || { n: 0, bad: 0, ms: [], jank: 0 }; ks.n++; ks.ms.push(ms); if (ks.ms.length > 400) ks.ms.shift(); T.kinds.set(cur.kind, ks);
@@ -551,10 +630,132 @@ async function oneAction() {
   const shift = T.shifts - sh0; if (!check('layout does not jump', shift < 0.25)) find('layout-shift', 'info', `The layout shifted (score ${shift.toFixed(2)}) after: ${cur.desc}`, { where: cur.kind + ':' + (cur.ctl || ''), thumb: false });
   const slow = cur.kind === 'example' || cur.kind === 'export' || cur.kind === 'drop' || cur.kind === 'macro' ? 30000 : 3000;
   if (!check('actions finish promptly', ms < slow)) find('slow', 'warn', `${cur.kind} took ${(ms / 1000).toFixed(1)} s: ${cur.desc}`, { where: cur.kind + ':' + (cur.ctl || ''), thumb: false });
+  T.live.stage = 'checked'; T.live.desc = cur.desc; T.live.ctl = cur.ctl; T.live.diff = diffParts(before, stateParts()); T.live.ms = ms; T.live.fmax = worst; T.live.fAvg = T.dts.length ? T.dts.slice(-30).reduce((a, b) => a + b, 0) / Math.min(30, T.dts.length) : 0;
+  T.live.cats = CATS.map(([cat, kinds, what]) => ({ cat, what, bad: cur.bad.filter((b) => kinds.test(b)).length })); T.live.trace.push({ at: Math.round((Date.now() - T.t0) / 100) / 10, text: cur.desc, changed: T.live.diff, ms: Math.round(ms), bad: cur.bad.length }); if (T.live.trace.length > 200) T.live.trace.shift();
   const bad = cur.bad.length > 0; if (bad) { T.fail++; ks.bad++; if (cur.ctl && T.cover.get(cur.ctl)) T.cover.get(cur.ctl).bad++; } else T.pass++;
+  if (cur.ctl) stepRec.ctl = cur.ctl;
   T.recent.push(`#${n} ${cur.desc}`); if (T.recent.length > 40) T.recent.shift();
   logLine(bad ? 'bad' : 'ok', `#${n} ${cur.desc}${bad ? '  ⟵ ' + cur.bad.join(', ') : ''}`);
   T.cur = null;
+}
+
+
+/* ---------------------------------------------------------------- plans: Quick, Standard, Thorough, and Aim at problems */
+const MODES = {
+  quick: { label: 'Quick: about 250 actions, every control once, pairs, random runs and each whole flow', budget: 250 },
+  standard: { label: 'Standard: about 900 actions with awkward values, pairs, random runs and every flow twice', budget: 900 },
+  thorough: { label: 'Thorough: about 3000 actions, every control many times, thousands of pairs and runs, every flow', budget: 3000 },
+  problems: { label: 'Aim at problems: scouts for suspects, replays old problems, spends most of its time on what is most likely to break, shrinks every failure', budget: 450, scoutShare: .14 },
+  free: { label: 'Free run: the original open-ended run (your rate, max and seed below)', budget: 0 },
+};
+const SHAPE_KEYS = ['cube', 'sphere', 'twoCubes', 'touching', 'open', 'inverted', 'tiny', 'huge', 'offset', 'thin', 'flat', 'dup', 'manySph'], FORMATS = ['stl', 'bstl', 'obj', 'ply', 'off'];
+const SETUPS = {
+  'a tiny model': () => aDrop({ shape: 'tiny', fmt: 'stl' }), 'a huge model': () => aDrop({ shape: 'huge', fmt: 'obj' }), 'a model far from the origin': () => aDrop({ shape: 'offset', fmt: 'bstl' }),
+  'a paper-thin model': () => aDrop({ shape: 'thin', fmt: 'stl' }), 'a flat model': () => aDrop({ shape: 'flat', fmt: 'ply' }), 'an open (holey) model': () => aDrop({ shape: 'open', fmt: 'obj' }),
+  'an inverted model': () => aDrop({ shape: 'inverted', fmt: 'stl' }), 'a model with doubled faces': () => aDrop({ shape: 'dup', fmt: 'off' }), 'a very dense sphere': () => aDrop({ shape: 'manySph', fmt: 'bstl' }),
+  'two touching solids': () => aDrop({ shape: 'touching', fmt: 'stl' }), 'a broken file dropped first': () => aDrop({ bad: true }),
+  'wire mode': () => A.setMode('wire'), 'ray-traced mode': () => A.setMode('rt'), 'flat (2D) mode': () => A.setMode('2d'),
+  'three undos': async () => { for (let i = 0; i < 3; i++) { key('z', { ctrl: 1 }, document.body); await settle(15000); } },
+  'a different finish': async () => { const sel = $('#vMat'); if (sel && sel.options.length) { const o = pick([...sel.options]); setValue(sel, o.value); sel.dispatchEvent(new Event('change', { bubbles: true })); } },
+};
+async function aSetup(name) { const fn = SETUPS[name] || SETUPS[pick(Object.keys(SETUPS))]; await fn(); await settle(25000); return name; }
+async function resetBaseline() {
+  try {
+    heal(); $$('.modal.on').forEach((m) => { if (!inDev(m)) m.classList.remove('on'); }); try { if (A.Tut && A.Tut.running) A.Tut.end(false); } catch (e) { /* ignore */ }
+    const base = A.EX()[0].items[0].id; await A.loadExample(base); await settle(25000);
+    try { await A.setMode('solid'); A.setTool('select'); } catch (e) { /* ignore */ }
+    await settle(10000);
+  } catch (e) { find('js-error', 'error', 'Resetting the tester failed: ' + (e && e.message), { stack: e && e.stack }); }
+}
+function targets() {
+  const out = [], seen = new Set();
+  scan().forEach((c) => { if (seen.has(c.key)) return; seen.add(c.key); const form = ['select', 'range', 'number', 'text', 'color', 'check'].includes(c.k); out.push({ id: c.key, kind: form ? 'form' : 'click', k: c.k, prior: c.k === 'number' || c.k === 'text' ? 5 : c.k === 'select' || c.k === 'range' ? 3.5 : c.k === 'color' ? 3 : c.k === 'check' ? 2.5 : c.k === 'dropdown' ? 3 : c.k === 'link' ? 1 : 2 }); });
+  return out;
+}
+const PSEUDO = [['canvas', 4], ['drop', 4.5], ['example', 3], ['history', 3.5], ['export', 3.5], ['macro', 3], ['key', 2]].map(([kind, prior]) => ({ id: 'kind:' + kind, kind, prior, pseudo: true }));
+function stepFor(t, fuzz) {
+  const st = { kind: t.kind, seed: Math.floor(rng() * 4294967296) };
+  if (!t.pseudo) st.ctl = t.id; if (fuzz) st.fuzz = true;
+  if (t.kind === 'drop') st.file = chance(0.3) ? { bad: true } : { shape: pick(SHAPE_KEYS), fmt: pick(FORMATS) };
+  return st;
+}
+function planPhase(name, planned) { const now0 = NOW(); if (T.phaseName) { const ps = T.phases[T.phaseName]; ps.ms = now0 - T.phaseT0; ps.done = T.n - ps.n0; } T.phaseName = name; T.phaseT0 = now0; T.phases[name] = T.phases[name] || { n0: T.n, ms: 0, done: 0, planned }; T.live.phase = name; ui(); }
+async function scenarioRun(name, steps) {
+  await resetBaseline(); T.scenario = []; T.live.scenario = name; const h0 = T.hits, s0 = T.soft;
+  for (const st of steps) { if (!T.running) break; await oneAction(st); if (T.hits > h0 + 8) break; }
+  const done = T.scenario.slice(); T.scenario = null; return { hit: T.hits - h0, soft: T.soft - s0, done };
+}
+async function runPlanned(mode) {
+  const M = MODES[mode], total = T.budgetOverride || M.budget; T.plan = { total, mode };
+  const split = { 'every control': .34, 'pairs': .14, 'random runs': .30, 'flows': .22 }, planned = {}; Object.keys(split).forEach((k) => { planned[k] = Math.round(total * split[k]); T.plan[k] = planned[k]; });
+  const ps = (name) => { planPhase(name, planned[name]); return T.n + planned[name]; };
+  let target = ps('every control'); await resetBaseline();
+  const all = targets().concat(PSEUDO); let i = 0, sinceReset = 0;
+  while (T.running && T.n < target) { const t = all[i++ % all.length]; if (i % all.length === 1) all.sort(() => rng() - 0.5); await oneAction(stepFor(t, true)); if (++sinceReset >= 14) { sinceReset = 0; await resetBaseline(); } }
+  target = ps('pairs');
+  while (T.running && T.n < target) { const cs = targets().concat(PSEUDO); await scenarioRun('pair', [stepFor(pick(cs), true), stepFor(pick(cs), true)]); }
+  target = ps('random runs');
+  while (T.running && T.n < target) { const len = ri(3, 8); await scenarioRun('random run', Array.from({ length: len }, () => ({}))); }
+  target = ps('flows');
+  const flows = Object.keys(MACROS).map((m) => ({ kind: 'macro', macro: m })).concat(A.EX().flatMap((g) => g.items.map((e) => ({ kind: 'example', example: e.id }))), SHAPE_KEYS.map((k) => ({ kind: 'drop', file: { shape: k, fmt: pick(FORMATS) } })), [{ kind: 'drop', file: { bad: true } }, { kind: 'history' }, { kind: 'export' }]);
+  let f = 0; while (T.running && T.n < target) { const spec = Object.assign({}, flows[f++ % flows.length]); if (f % flows.length === 1) flows.sort(() => rng() - 0.5); await scenarioRun('flow: ' + (spec.macro || spec.example || spec.kind), [spec]); }
+}
+
+/* aim at problems: what is remembered, scouting, replay, hunting, shrinking */
+const MEM = 'devtest-problems.v1';
+const loadMem = () => { try { const o = JSON.parse(localStorage.getItem(MEM)); return o && typeof o === 'object' ? { ctl: o.ctl || {}, repros: o.repros || [] } : { ctl: {}, repros: [] }; } catch (e) { return { ctl: {}, repros: [] }; } };
+const saveMem = (o) => { try { localStorage.setItem(MEM, JSON.stringify(o)); } catch (e) { /* ignore */ } };
+async function runProblems() {
+  const M = MODES.problems, total = T.budgetOverride || M.budget, mem = loadMem(); T.plan = { total, mode: 'problems' };
+  const P = T.problems = { memory: { suspects: Object.keys(mem.ctl).length, repros: mem.repros.length }, replay: [], minimal: [], suspects: [], types: {}, aimed: 0, explore: 0, scouted: 0 };
+  const scoutN = Math.round(total * M.scoutShare), replayN = Math.min(mem.repros.length, Math.round(total * .1)), shrinkN = 24, huntN = Math.max(20, total - scoutN - replayN - shrinkN);
+  T.plan.scouting = scoutN; T.plan['replaying old problems'] = replayN; T.plan.hunting = huntN; T.plan['shrinking repros'] = shrinkN;
+  const sus = new Map(), get = (t) => { let x = sus.get(t.id); if (!x) { const m = mem.ctl[t.id]; x = { t, id: t.id, label: t.id, prior: t.prior, mem: m ? m.score * .7 : 0, found: 0, hits: 0, uses: 0, bad: {} }; sus.set(t.id, x); } return x; };
+  const weight = (x) => Math.pow(.5 + x.prior * .35 + x.mem + x.found, 1.6);
+  const roulette = (list) => { let tot = 0; const w = list.map((x) => { const v = weight(x); tot += v; return v; }); let k = rng() * tot; for (let i = 0; i < list.length; i++) { k -= w[i]; if (k <= 0) return list[i]; } return list[list.length - 1]; };
+  const idOf = (st) => st.ctl || 'kind:' + st.kind;
+  const learn = (steps, hit, soft) => { for (const st of steps) { const x = sus.get(idOf(st)); if (!x) continue; x.uses++; if (hit) { x.found += 1.6; x.hits += hit; } else if (soft) x.found += .4; } if (hit && steps.length) { const x = sus.get(idOf(steps[steps.length - 1])); if (x) x.found += 2.4; } };
+  const pool = mem.repros.map((r) => ({ steps: r.steps })), sig = (a) => a.map((x) => idOf(x) + '/' + (x.name || x.macro || x.example || '')).join('>');
+  try {
+    await resetBaseline();
+    planPhase('scouting', scoutN);
+    { const ts = targets().concat(PSEUDO); ts.forEach(get); const order = [...sus.values()].sort((a, b) => (b.prior + b.mem * 2 + (b.uses ? 0 : 1.5) + rng()) - (a.prior + a.mem * 2 + (a.uses ? 0 : 1.5) + rng()));
+      let used = 0; for (const x of order) { if (used >= scoutN || !T.running) break; const st = stepFor(x.t, true); const res = await scenarioRun('scout: ' + x.id, [st]); used++; P.scouted++; learn(res.done, res.hit, res.soft); if (res.hit) pool.push({ steps: res.done }); } }
+    planPhase('replaying old problems', replayN);
+    { const keep = []; for (const old of mem.repros.slice(0, replayN)) { if (!T.running) break; const c0 = (T.issues.get(old.key) || { count: 0 }).count; const res = await scenarioRun('replay: ' + old.msg.slice(0, 60), old.steps); const still = res.hit > 0 || (T.issues.get(old.key) || { count: 0 }).count > c0; P.replay.push({ msg: old.msg, kind: old.kind, still, steps: old.steps.length }); if (still) { old.seen = (old.seen || 1) + 1; keep.push(old); pool.push({ steps: old.steps }); } }
+      mem.repros = keep.concat(mem.repros.slice(replayN)); }
+    planPhase('hunting', huntN);
+    { const target = T.n + huntN; const setupNames = Object.keys(SETUPS);
+      while (T.running && T.n < target) {
+        const ts = targets().concat(PSEUDO); ts.forEach(get); const live = ts.map((t) => get(t));
+        const withSetups = (steps) => (rng() < .5 ? Array.from({ length: rng() < .25 ? 2 : 1 }, () => ({ kind: 'setup', name: pick(setupNames), seed: Math.floor(rng() * 4294967296) })).concat(steps) : steps);
+        const roll = rng(); let kind, steps = [];
+        if (roll < .14) { kind = 'explore'; P.explore++; steps = withSetups(Array.from({ length: ri(3, 7) }, () => stepFor(pick(ts), true))); }
+        else if (roll < .26 && pool.length) {
+          kind = 'mutate'; P.aimed++; const base = pick(pool).steps.map((x) => Object.assign({}, x)); const how = ri(0, 4);
+          if (how === 0 && base.length > 1) base.splice(ri(0, base.length - 1), 1); else if (how === 1) { const j = ri(0, base.length - 1); base[j].seed = Math.floor(rng() * 4294967296); base[j].fuzz = true; } else if (how === 2 && base.length > 1) { const j = ri(0, base.length - 2); [base[j], base[j + 1]] = [base[j + 1], base[j]]; } else if (how === 3) base.push(stepFor(roulette(live).t, true)); else base.forEach((x) => { x.seed = Math.floor(rng() * 4294967296); });
+          steps = base;
+        } else {
+          P.aimed++; const x = roulette(live);
+          if (roll < .5) { kind = 'pair'; const partner = rng() < .5 ? roulette(live).t : pick(ts); const a = stepFor(x.t, true), b = stepFor(partner, true); steps = withSetups(rng() < .5 ? [a, b] : [b, a]); }
+          else if (roll < .72 && x.t.kind === 'form') { kind = 'fuzz'; steps = withSetups(Array.from({ length: ri(3, 6) }, () => stepFor(x.t, true))); }
+          else { kind = 'chain'; steps = withSetups(Array.from({ length: ri(4, 8) }, () => stepFor(rng() < .65 ? roulette(live).t : pick(ts), true))); }
+        }
+        P.types[kind] = (P.types[kind] || 0) + 1;
+        const res = await scenarioRun('hunt (' + kind + ')', steps); learn(res.done, res.hit, res.soft);
+        if (res.hit && !pool.some((q) => sig(q.steps) === sig(res.done))) pool.push({ steps: res.done });
+      } }
+    planPhase('shrinking repros', shrinkN);
+    { const errs = [...T.issues.values()].filter((i) => i.sev === 'error' && i.trail && i.trail.length > 1).sort((a, b) => b.count - a.count).slice(0, 6); let budget = shrinkN;
+      for (const iss of errs) { if (!T.running || budget <= 0) break; let cur = iss.trail.map((x) => Object.assign({}, x)), j = 0;
+        while (j < cur.length - 1 && budget > 0 && T.running) { const trial = cur.slice(0, j).concat(cur.slice(j + 1)); const c0 = (T.issues.get(iss.key) || { count: 0 }).count; budget--; await scenarioRun('shrink: ' + iss.msg.slice(0, 50), trial); if ((T.issues.get(iss.key) || { count: 0 }).count > c0) cur = trial; else j++; }
+        iss.minimal = cur; P.minimal.push({ msg: iss.msg, from: iss.trail.length, to: cur.length, steps: cur.map((d) => idOf(d) + (d.name ? ' = ' + d.name : '') + (d.macro ? ' = ' + d.macro : '') + (d.example ? ' = ' + d.example : '')) }); } }
+  } finally {
+    for (const x of sus.values()) { const old = mem.ctl[x.id] ? mem.ctl[x.id].score * .75 : 0, score = Math.round((old + x.found) * 100) / 100; if (score > .2) mem.ctl[x.id] = { score, hits: (mem.ctl[x.id] ? mem.ctl[x.id].hits : 0) + x.hits }; else delete mem.ctl[x.id]; }
+    for (const i of T.issues.values()) if (i.sev === 'error' && (i.minimal || i.trail) && !mem.repros.some((q) => q.key === i.key)) mem.repros.unshift({ key: i.key, kind: i.kind, msg: i.msg, steps: (i.minimal || i.trail).map((x) => Object.assign({}, x)), seen: 1 });
+    mem.repros = mem.repros.slice(0, 40); saveMem(mem);
+    P.suspects = [...sus.values()].filter((x) => x.uses || x.mem).map((x) => ({ id: x.id, prior: x.prior, score: Math.round((x.mem + x.found) * 100) / 100, hits: x.hits, remembered: x.mem > 0 })).sort((a, b) => (b.score - a.score) || (b.prior - a.prior)).slice(0, 12); P.measured = P.suspects.some((x) => x.score > 0);
+  }
 }
 
 /* ---------------------------------------------------------------- run control */
@@ -565,7 +766,7 @@ async function calibrate() {
 }
 async function loop() {
   while (T.running) {
-    if (T.paused || document.hidden) { await sleep(250); if (document.hidden && !T.hiddenWarned) { T.hiddenWarned = true; logLine('warn', 'The tab is in the background, so the browser slows timers. Keep this tab visible for 10 actions per second.'); } continue; }
+    if (T.paused || (document.hidden && !BG.active)) { await sleep(250); if (document.hidden && !T.hiddenWarned) { T.hiddenWarned = true; logLine('warn', 'The tab is in the background, so the browser slows timers. Keep this tab visible for 10 actions per second.'); } continue; }
     T.hiddenWarned = false; const t0 = now();
     try { await oneAction(); } catch (e) { find('js-error', 'error', 'Tester error: ' + (e && e.message), { stack: e && e.stack }); T.cur = null; }
     T.rateWin.push(now()); while (T.rateWin.length > 40) T.rateWin.shift();
@@ -581,11 +782,17 @@ async function start(o = {}) {
   if (T.n === 0 || o.reset) resetStats(); T.running = true; T.paused = false; T.tEnd = 0; T.tRun = now(); T.t0 = T.t0 || Date.now(); T.endReason = '';
   { const al = $('#alphaModal.on #alphaGo'); if (al) al.click(); }   // (the alpha-testing popup shown when the page loads)
   hook(); logLine('ok', `Started: seed ${T.seed}, ${T.turbo ? 'full speed' : T.rate + ' actions/s'}${T.max ? ', ' + T.max + ' actions' : ', until stopped'}`); ui();
-  await calibrate(); if (!T.running) return; loop();
+  await calibrate(); if (!T.running) return;
+  T.mode = MODES[o.mode] ? o.mode : 'free'; T.budgetOverride = o.budget || 0; T.speed = o.speed != null ? +o.speed : (T.mode === 'free' ? 1 : 10); T.phases = {}; T.phaseName = ''; T.plan = null; T.problems = null; T.live.trace = [];
+  BG.start(T.speed);
+  if (T.mode === 'free') { loop(); return; }
+  try { if (T.mode === 'problems') await runProblems(); else await runPlanned(T.mode); } catch (e) { find('js-error', 'error', 'Tester error: ' + (e && e.message), { stack: e && e.stack }); }
+  T.scenario = null; stop(T.running ? 'plan finished' : 'stopped');
 }
-function stop(why) { if (!T.running) return; T.running = false; T.tEnd = now(); T.endReason = why || 'stopped'; FM.on = false; unhook(); logLine('ok', 'Finished: ' + T.endReason); autosave(); ui(); }
+function stop(why) { if (!T.running) return; T.running = false; T.tEnd = now(); T.endReason = why || 'stopped'; FM.on = false; T.turboUsed = BG.turbo; T.bgFrames = BG.hiddenFrames; T.speedUsed = BG.speed; BG.stop(); unhook(); logLine('ok', 'Finished: ' + T.endReason); autosave(); ui(); }
 function resetStats() {
   Object.assign(T, { n: 0, sub: 0, pass: 0, fail: 0, checks: new Map(), kinds: new Map(), issues: new Map(), log: [], recent: [], cur: null, cover: new Map(), pairs: new Set(), lastKey: '', features: new Map(), downloads: [], counters: { filePickerBlocked: 0, externalBlocked: 0, dialogs: 0, healed: 0, rejectedOk: 0, loadedOk: 0 }, toasts: [], shifts: 0, longtasks: [], mem0: null, heap0: 0, rateWin: [], thumbs: 0, t0: Date.now(), offscreen: 0, errCount: 0 });
+  Object.assign(T, { hits: 0, soft: 0, phases: {}, phaseName: '', plan: null, problems: null, scenario: null, bgFrames: 0 }); T.live.trace = []; T.live.cats = []; T.live.diff = null;
 }
 
 /* ---------------------------------------------------------------- report */
@@ -604,6 +811,14 @@ function reportText() {
   L.push('# 3D File to STEP File: automatic UX test report', '', `Seed ${T.seed} · ${T.n} actions (${T.sub} extra steps inside macros) in ${fmtT(R.dur)} · about ${R.rate.toFixed(1)} actions/s · ${T.endReason || (T.running ? 'still running' : 'stopped')}`, '');
   const verdict = R.errs.length ? 'NEEDS ATTENTION' : R.warns.length ? 'GOOD, WITH WARNINGS' : 'ALL CLEAR';
   L.push(`## Verdict: ${verdict}`, `- ${T.pass} of ${T.n} actions passed every check (${pct(T.pass, T.n)}%), ${T.fail} had a problem`, `- ${R.errs.length} errors, ${R.warns.length} warnings, ${R.infos.length} notes (distinct problems)`, `- Smoothness: ${R.fps.toFixed(0)} fps average, frame time typical ${R.p50.toFixed(0)} ms, 95th ${R.p95.toFixed(0)} ms, 99th ${R.p99.toFixed(0)} ms; ${T.longtasks.length} long tasks`, '');
+  if (T.plan) L.push('', `Mode: ${MODES[T.mode].label.split(':')[0]} · plan of ${T.plan.total} actions · ${Object.keys(T.plan).filter((k) => !['total', 'mode'].includes(k)).map((k) => k + ' ' + Math.min(T.plan[k], (T.phases[k] || { done: 0 }).done || 0)).join(', ')}`);
+  if (T.problems) { const P = T.problems; L.push('', '## Aimed at problems', `- ${T.n ? Math.round(100 * (T.n - P.scouted - P.explore) / T.n) : 0}% of the actions went to suspects (${Object.entries(P.types).map(([k, v]) => k + ' ' + v).join(', ')}); memory at the start: ${P.memory.suspects} suspect controls, ${P.memory.repros} old problems`,
+    P.measured ? '- Suspects (score = what went wrong around them):' : '- Nothing went wrong, so there is no measured ranking. These are the controls the tester thinks most likely to break (a starting guess by kind of control):');
+    P.suspects.forEach((x) => L.push(`    ${x.id}: ${P.measured ? 'score ' + x.score : 'likelihood about ' + x.prior + ' of 5'}, ${x.hits} problem(s)${x.remembered ? ' (remembered)' : ''}`));
+    if (P.replay.length) { L.push('- Old problems, replayed:'); P.replay.forEach((x) => L.push(`    ${x.still ? 'STILL FAILING' : 'fixed'} [${x.kind}] ${x.msg.slice(0, 110)}`)); }
+    if (P.minimal.length) { L.push('- Shortest recipes:'); P.minimal.forEach((x) => L.push(`    ${x.msg.slice(0, 100)} (${x.from} → ${x.to} steps): ${x.steps.join(' > ')}`)); } }
+  if (T.turboUsed) L.push('', 'Note: this run used the sped-up clock with frames not tied to the display, so smoothness numbers are only a rough guide. Pick Real time for a true grade.');
+  if (T.bgFrames) L.push('', `Note: the tab was in the background for part of the run (${T.bgFrames} frames came from a worker clock).`);
   L.push('## What went wrong');
   if (!R.issues.length) L.push('Nothing. Every check passed.');
   R.issues.forEach((i, k) => {
@@ -622,30 +837,33 @@ function reportText() {
   if (R.miss.length) L.push(`- Not used yet (${R.miss.length}): ${R.miss.slice(0, 40).map((c) => c.label).join('; ')}${R.miss.length > 40 ? '; …' : ''}`);
   return L.join('\n');
 }
-function reportJSON() { const R = build(); return JSON.stringify({ seed: T.seed, actions: T.n, durationMs: Math.round(R.dur), rate: R.rate, pass: T.pass, fail: T.fail, issues: R.issues.map((i) => ({ kind: i.kind, severity: i.sev, message: i.msg, count: i.count, first: i.first, last: i.last, likelyCause: i.diag, stack: i.stack, state: i.state, during: [...i.actions], controls: [...i.ctl], repro: i.repro, thumb: i.thumb })), checks: Object.fromEntries([...T.checks.entries()].map(([k, v]) => [k, v])), kinds: Object.fromEntries([...T.kinds.entries()].map(([k, v]) => [k, { n: v.n, bad: v.bad, jank: v.jank }])), features: Object.fromEntries(T.features), coverage: { total: R.tot.length, used: R.hit.length, pairs: T.pairs.size, unused: R.miss.map((c) => c.label) }, smoothness: { fps: R.fps, p50: R.p50, p95: R.p95, p99: R.p99, longTasks: T.longtasks.length } }, null, 1); }
+function reportJSON() { const R = build(); return JSON.stringify({ mode: T.mode, plan: T.plan, problems: T.problems, seed: T.seed, actions: T.n, durationMs: Math.round(R.dur), rate: R.rate, pass: T.pass, fail: T.fail, issues: R.issues.map((i) => ({ kind: i.kind, severity: i.sev, message: i.msg, count: i.count, first: i.first, last: i.last, likelyCause: i.diag, stack: i.stack, state: i.state, during: [...i.actions], controls: [...i.ctl], repro: i.repro, thumb: i.thumb })), checks: Object.fromEntries([...T.checks.entries()].map(([k, v]) => [k, v])), kinds: Object.fromEntries([...T.kinds.entries()].map(([k, v]) => [k, { n: v.n, bad: v.bad, jank: v.jank }])), features: Object.fromEntries(T.features), coverage: { total: R.tot.length, used: R.hit.length, pairs: T.pairs.size, unused: R.miss.map((c) => c.label) }, smoothness: { fps: R.fps, p50: R.p50, p95: R.p95, p99: R.p99, longTasks: T.longtasks.length } }, null, 1); }
 function autosave() { try { localStorage.setItem('devtest-report', JSON.stringify({ at: Date.now(), n: T.n, text: reportText() })); } catch (e) { /* ignore */ } }
 function download(name, text, type) { const b = new Blob([text], { type }), u = URL.createObjectURL(b), a = document.createElement('a'); a.href = u; a.download = name; document.body.appendChild(a); a.dispatchEvent(new MouseEvent('click')); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 2000); }
 
 /* ---------------------------------------------------------------- panel */
-let el = null, tab = 'log', lastUi = 0;
-const CSS = `#devtest{position:fixed;left:12px;bottom:12px;width:460px;max-width:calc(100vw - 24px);height:520px;max-height:calc(100vh - 24px);z-index:2147483000;display:flex;flex-direction:column;background:#0d0f13f2;color:#e8eaee;border:1px solid #2c323c;border-radius:12px;box-shadow:0 18px 60px #000a;font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;resize:both;overflow:hidden;min-width:340px;min-height:220px}
+let el = null, tab = 'now', lastUi = 0;
+const CSS = `#devtest{position:fixed;left:12px;bottom:12px;width:540px;max-width:calc(100vw - 24px);height:680px;max-height:calc(100vh - 24px);z-index:2147483000;display:flex;flex-direction:column;background:#0d0f13f2;color:#e8eaee;border:1px solid #2c323c;border-radius:12px;box-shadow:0 18px 60px #000a;font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;resize:both;overflow:hidden;min-width:340px;min-height:220px}
 #devtest *{box-sizing:border-box}#devtest .h{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid #232831;cursor:move;user-select:none}#devtest .h b{font:700 12px system-ui,sans-serif;letter-spacing:.08em;text-transform:uppercase}#devtest .h .sp{flex:1}
 #devtest button{font:600 11px system-ui,sans-serif;color:#e8eaee;background:#1b2028;border:1px solid #333b47;border-radius:7px;padding:5px 9px;cursor:pointer}#devtest button:hover{border-color:#6c7a90}#devtest button.go{background:#1f6f43;border-color:#2e9d62}#devtest button.no{background:#7a2530;border-color:#b0404f}#devtest button.on{border-color:#7ab8ff;color:#7ab8ff}
 #devtest input{font:11px ui-monospace,monospace;color:#e8eaee;background:#12161c;border:1px solid #333b47;border-radius:6px;padding:4px 6px;width:64px}#devtest label{display:flex;align-items:center;gap:4px;color:#98a2b3}
 #devtest .row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:8px 10px;border-bottom:1px solid #232831}#devtest .stats{display:grid;grid-template-columns:repeat(5,1fr);gap:1px;background:#232831;border-bottom:1px solid #232831}#devtest .stats div{background:#0d0f13;padding:6px 8px}#devtest .stats b{display:block;font-size:15px}#devtest .stats span{color:#98a2b3;font-size:10px;text-transform:uppercase;letter-spacing:.06em}
 #devtest .tabs{display:flex;gap:4px;padding:6px 10px 0}#devtest .body{flex:1;overflow:auto;padding:8px 10px;white-space:pre-wrap;word-break:break-word}#devtest .ok{color:#7bd59a}#devtest .bad{color:#ff7b8a}#devtest .warn{color:#ffc766}#devtest .dim{color:#7b8696}#devtest .iss{border:1px solid #2c323c;border-radius:8px;padding:7px 9px;margin-bottom:7px;background:#12161c}#devtest .iss h4{margin:0 0 3px;font:700 11px system-ui,sans-serif}#devtest .iss img{display:block;margin-top:5px;border-radius:5px;max-width:100%}
 #devtest>.h,#devtest>.row,#devtest>.stats,#devtest>.tabs,#devtest>.bar{flex:none}#devtest .body{flex:1 1 auto;min-height:0}#devtest .tabs{flex-wrap:wrap;padding-bottom:6px}
-#devtest .bar{height:4px;background:#232831}#devtest .bar i{display:block;height:100%;background:#2e9d62}`;
+#devtest>#dtLabel,#devtest>#dtEta,#devtest>#dtPhases{flex:none}#devtest select{font:600 11px system-ui,sans-serif;color:#e8eaee;background:#1b2028;border:1px solid #333b47;border-radius:7px;padding:4px 6px}#devtest .bar{height:4px;background:#232831}#devtest .bar i{display:block;height:100%;background:#2e9d62}`;
 function build_ui() {
   if (el) return;
   const st = document.createElement('style'); st.id = 'devtest-css'; st.textContent = CSS; document.head.appendChild(st);
   el = document.createElement('div'); el.id = 'devtest'; el.hidden = true; el.setAttribute('role', 'dialog'); el.setAttribute('aria-label', 'Automatic UX tester');
   el.innerHTML = `<div class="h"><b>UX tester</b><span class="dim">press ` + '`' + ` to hide</span><span class="sp"></span><button data-a="min" title="Collapse">–</button><button data-a="close" title="Hide (the test keeps running)">✕</button></div>
+<div class="row"><select id="dtMode" title="What kind of run"><option value="quick">Quick</option><option value="standard">Standard</option><option value="thorough">Thorough</option><option value="problems">Aim at problems</option><option value="free" selected>Free run</option></select><select id="dtSpeed" title="How much faster than real time the page's animations and timers run. Faster means more actions per second."><option value="1">Real time</option><option value="4">4× faster</option><option value="10" selected>10× faster</option><option value="20">20× faster</option></select><button data-a="forget" title="Forget the suspects and problems remembered from earlier Aim at problems runs">Forget memory</button></div>
+<div class="dim" id="dtLabel" style="padding:2px 10px"></div>
 <div class="row"><button class="go" data-a="start">▶ Start</button><button data-a="pause" disabled>❚❚ Pause</button><button class="no" data-a="stop" disabled>■ Stop</button>
 <label>per sec<input id="dtRate" type="number" min="1" max="60" value="10"></label><label>max<input id="dtMax" type="number" min="0" value="0" title="0 = keep going until stopped"></label><label>seed<input id="dtSeed" type="number" value="1"></label><label title="Ignore the rate and go as fast as the page allows"><input id="dtTurbo" type="checkbox" style="width:auto">turbo</label></div>
 <div class="bar"><i id="dtBar" style="width:0%"></i></div>
+<div class="dim" id="dtEta" style="padding:3px 10px"></div><div id="dtPhases" style="padding:0 10px"></div>
 <div class="stats"><div><b id="dtN">0</b><span>actions</span></div><div><b id="dtP" class="ok">0</b><span>passed</span></div><div><b id="dtF" class="bad">0</b><span>failed</span></div><div><b id="dtR">0</b><span>per sec</span></div><div><b id="dtT">0s</b><span>running</span></div></div>
-<div class="tabs"><button data-t="log" class="on">Live log</button><button data-t="issues">Problems <span id="dtI">0</span></button><button data-t="report">Report</button><button data-t="cover">Coverage</button></div>
+<div class="tabs"><button data-t="now" class="on">Now</button><button data-t="log">Live log</button><button data-t="issues">Problems <span id="dtI">0</span></button><button data-t="report">Report</button><button data-t="cover">Coverage</button></div>
 <div class="body" id="dtBody"></div>
 <div class="row"><button data-a="copy">Copy report</button><button data-a="md">Save .md</button><button data-a="json">Save .json</button><button data-a="clear">Clear</button><span class="dim" id="dtMsg"></span></div>`;
   document.body.appendChild(el);
@@ -653,11 +871,12 @@ function build_ui() {
     const b = e.target.closest('button'); if (!b) return;
     if (b.dataset.t) { tab = b.dataset.t; $$('.tabs button', el).forEach((x) => x.classList.toggle('on', x === b)); ui(true); return; }
     const a = b.dataset.a;
-    if (a === 'start') start({ seed: +$('#dtSeed').value || 1, rate: clamp(+$('#dtRate').value || 10, 1, 60), max: Math.max(0, +$('#dtMax').value || 0), turbo: $('#dtTurbo').checked, reset: T.n > 0 && !T.running });
+    if (a === 'forget') { try { localStorage.removeItem(MEM); } catch (e) { /* ignore */ } labelUi(); msg('Memory cleared'); }
+    else if (a === 'start') start({ mode: $('#dtMode').value, speed: +$('#dtSpeed').value, seed: +$('#dtSeed').value || 1, rate: clamp(+$('#dtRate').value || 10, 1, 60), max: Math.max(0, +$('#dtMax').value || 0), turbo: $('#dtTurbo').checked, reset: T.n > 0 && !T.running });
     else if (a === 'stop') stop('stopped by you');
     else if (a === 'pause') { T.paused = !T.paused; b.textContent = T.paused ? '▶ Resume' : '❚❚ Pause'; }
     else if (a === 'close') toggle(false);
-    else if (a === 'min') el.style.height = el.style.height === '40px' ? '520px' : '40px';
+    else if (a === 'min') el.style.height = el.style.height === '40px' ? '680px' : '40px';
     else if (a === 'copy') { const t = reportText(); (navigator.clipboard && navigator.clipboard.writeText ? navigator.clipboard.writeText(t) : Promise.reject()).then(() => msg('Report copied'), () => { tab = 'report'; ui(true); msg('Select and copy from the Report tab'); }); }
     else if (a === 'md') download('ux-test-report.md', reportText(), 'text/markdown');
     else if (a === 'json') download('ux-test-report.json', reportJSON(), 'application/json');
@@ -668,18 +887,47 @@ function build_ui() {
   addEventListener('pointermove', (e) => { if (!drag || !e.isTrusted) return; el.style.left = clamp(e.clientX - drag.x, 0, innerWidth - 100) + 'px'; el.style.top = clamp(e.clientY - drag.y, 0, innerHeight - 40) + 'px'; el.style.bottom = 'auto'; });
   addEventListener('pointerup', () => { drag = null; });
   el.addEventListener('keydown', (e) => e.stopPropagation());
+  $('#dtMode', el).onchange = labelUi; labelUi();
   setInterval(() => { if (T.open && now() - lastUi > 400) ui(); }, 500);
 }
 const msg = (t) => { const m = $('#dtMsg'); if (m) { m.textContent = t; setTimeout(() => { m.textContent = ''; }, 2500); } };
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+const fmtDur = (ms) => { ms = Math.max(0, Math.round(ms / 1000)); const h = Math.floor(ms / 3600), m = Math.floor(ms % 3600 / 60), sec = ms % 60; return h ? `${h}h ${String(m).padStart(2, '0')}m` : m ? `${m}m ${String(sec).padStart(2, '0')}s` : `${sec}s`; };
+const clock = (t) => new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' });
+function labelUi() { const l = $('#dtLabel'), m = $('#dtMode'); if (!l || !m) return; let t = MODES[m.value].label; if (m.value === 'problems') { const mm = loadMem(); t += ` · remembered: ${Object.keys(mm.ctl).length} suspect controls, ${mm.repros.length} problems to replay`; } l.textContent = t; }
+/* time left: phases already measured use their own average, the ones not reached yet use the average so far */
+function estimate() {
+  const plan = T.plan; if (!plan) return 0; const names = Object.keys(T.phases), allNames = Object.keys(plan).filter((k) => !['total', 'mode'].includes(k));
+  const perAct = T.n > 4 ? (Date.now() - T.t0) / T.n : 800; let left = 0;
+  for (const n of allNames) { const planned = plan[n], ps = T.phases[n]; if (!ps) { left += planned * perAct; continue; } const live = n === T.phaseName, done = live ? T.n - ps.n0 : ps.done, ms = live ? NOW() - T.phaseT0 : ps.ms; left += Math.max(0, planned - done) * (done >= 3 ? ms / done : perAct); }
+  return left;
+}
+function etaText(total) {
+  const R = build(), rate = T.n / Math.max(1, R.dur / 1000), tests = ' · ' + rate.toFixed(1) + ' actions per second' + (BG.speed > 1 && T.running ? ', time ×' + BG.speed : '');
+  if (T.running && T.plan) { const left = estimate(), fin = Date.now() + left; T.finishAt = T.finishAt && T.n > 5 ? T.finishAt * 0.85 + fin * 0.15 : fin; return T.n < 3 ? 'estimating the finishing time…' : `${Math.round(Math.min(99.9, 100 * T.n / total))}% · about ${fmtDur(T.finishAt - Date.now())} left · done around ${clock(T.finishAt)}${tests}`; }
+  if (!T.running && T.n && T.plan) return `${T.endReason || 'finished'} · took ${fmtDur(R.dur)}${tests}`;
+  return T.running ? `running${tests}` : '';
+}
+function phasesHtml() { if (!T.plan) return ''; return Object.keys(T.plan).filter((k) => !['total', 'mode'].includes(k)).map((n) => { const ps = T.phases[n], planned = T.plan[n], done = !ps ? 0 : (n === T.phaseName && T.running ? T.n - ps.n0 : ps.done); return `<div style="display:flex;gap:8px;align-items:center;font-size:11px"><span style="width:130px">${esc(n)}</span><span style="width:64px" class="dim">${Math.min(done, planned)} / ${planned}</span><div class="bar" style="flex:1"><i style="width:${Math.min(100, 100 * done / Math.max(1, planned))}%"></i></div></div>`; }).join(''); }
+function nowHtml() {
+  const L = T.live, row = (k, v) => (v === '' || v == null ? '' : `<tr><td style="color:#98a2b3;white-space:nowrap;padding-right:10px;vertical-align:top">${k}</td><td>${v}</td></tr>`);
+  if (!T.n && !T.running) return '<span class="dim">Press Start. This tab shows exactly what is being tested at each moment, and why.</span>';
+  const chips = L.cats.length ? L.cats.map((c) => `<span title="${esc(c.what)}" class="${c.bad ? 'bad' : 'ok'}" style="border:1px solid #33333f;border-radius:9px;padding:0 6px;margin:1px 3px 1px 0;display:inline-block">${c.bad ? '✗' : '✓'} ${esc(c.cat)}</span>`).join('') : '<span class="dim">runs after the action settles</span>';
+  const exp = L.kind === 'form' ? 'the control ends up with a valid value or its old one, and nothing shows NaN' : L.kind === 'drop' ? 'a good file opens; a broken file is refused with a message' : L.kind === 'export' ? 'a STEP file with header, footer and no NaN' : '';
+  const fr = L.fmax ? `${Math.round(L.ms)} ms · frames avg ${L.fAvg.toFixed(1)} ms, worst ${Math.round(L.fmax)} ms` : '';
+  return `<table>${row('Phase', esc(L.phase) + (T.plan && T.phases[L.phase] ? ` · ${Math.min(T.plan[L.phase] || 0, T.n - T.phases[L.phase].n0)} of ${T.plan[L.phase] || 0}` : ''))}${row('Scenario', esc(L.scenario))}${row('Stage', esc(L.stage))}${row('Action', L.kind ? `<b>${esc(L.kind)}</b> ${esc(L.desc || '')}` : '')}${row('Purpose', L.kind && PURPOSE[L.kind] ? esc('To ' + PURPOSE[L.kind] + '.') : '')}${row('Expecting', esc(exp))}${row('Changed', L.diff ? (L.diff.length ? esc(L.diff.join(', ')) : '<span class="warn">nothing changed on screen</span>') : '')}${row('Response', fr)}${row('Checks', chips)}${row('Problems so far', T.issues.size ? `<span class="bad">${T.issues.size}</span>` : '<span class="ok">none</span>')}</table><div style="border-top:1px solid #232831;margin-top:6px;padding-top:4px;font:11px/1.4 ui-monospace,monospace;color:#b9b9c6;max-height:160px;overflow:auto">${L.trace.slice(-14).reverse().map((x) => `<div class="${x.bad ? 'bad' : ''}">${x.at}s · ${esc(x.text)}${x.changed && x.changed.length ? ' → ' + esc(x.changed.join(', ')) : ''} · ${x.ms} ms${x.bad ? ' · ' + x.bad + ' problem(s)' : ''}</div>`).join('')}</div>`;
+}
 function ui(force) {
   if (!el || (!T.open && !force)) return; lastUi = now();
   const R = build(), set = (id, v) => { const e = $('#' + id); if (e && e.textContent !== String(v)) e.textContent = v; };
   set('dtN', T.n); set('dtP', T.pass); set('dtF', T.fail); set('dtR', R.rate.toFixed(1)); set('dtT', fmtT(R.dur)); set('dtI', R.issues.length);
-  const bar = $('#dtBar'); if (bar) bar.style.width = (T.max ? Math.min(100, 100 * T.n / T.max) : T.running ? (T.n % 100) : 0) + '%';
+  const total = T.plan ? T.plan.total : T.max, pctDone = total ? Math.min(T.running ? 99.9 : 100, 100 * T.n / total) : 0, bar = $('#dtBar'); if (bar) bar.style.width = (total ? pctDone : T.running ? (T.n % 100) : 0) + '%';
+  set('dtEta', etaText(total)); const phEl = $('#dtPhases'); if (phEl) { const h = phasesHtml(); if (phEl.dataset.h !== h) { phEl.dataset.h = h; phEl.innerHTML = h; } }
   const s = $('[data-a=start]', el), p = $('[data-a=pause]', el), x = $('[data-a=stop]', el); s.disabled = T.running; p.disabled = !T.running; x.disabled = !T.running; s.textContent = T.running ? '● Running' : T.n ? '▶ Run again' : '▶ Start';
   const body = $('#dtBody'), atBottom = body.scrollTop + body.clientHeight >= body.scrollHeight - 30;
-  if (tab === 'log') { body.innerHTML = T.log.slice(-160).map((l) => `<div class="${l.cls}">${esc(l.text)}</div>`).join('') || '<span class="dim">Press Start. It will click, drag, type, drop files and press keys by itself, and check what happens. Leave this tab in front so the browser does not slow it.</span>'; if (atBottom) body.scrollTop = body.scrollHeight; }
+  if (tab === 'now') body.innerHTML = nowHtml();
+  else if (tab === 'log') { body.innerHTML = T.log.slice(-160).map((l) => `<div class="${l.cls}">${esc(l.text)}</div>`).join('') || '<span class="dim">Press Start. It will click, drag, type, drop files and press keys by itself, and check what happens. Leave this tab in front so the browser does not slow it.</span>'; if (atBottom) body.scrollTop = body.scrollHeight; }
   else if (tab === 'issues') { body.innerHTML = R.issues.length ? R.issues.map((i) => `<div class="iss"><h4 class="${i.sev === 'error' ? 'bad' : i.sev === 'warn' ? 'warn' : 'dim'}">${i.sev.toUpperCase()} · ${esc(i.kind)} · ×${i.count}</h4>${esc(i.msg)}${i.diag ? `<div class="dim">Likely cause: ${esc(i.diag)}</div>` : ''}<div class="dim">first at #${i.first} · ${esc([...i.actions].join(', '))}</div>${i.thumb ? `<img src="${i.thumb}" alt="">` : ''}<div class="dim">${esc(i.repro.slice(-5).join('\n'))}</div></div>`).join('') : '<span class="ok">No problems found so far.</span>'; }
   else if (tab === 'report') body.textContent = reportText();
   else if (tab === 'cover') { const rows = [...T.cover.values()].sort((a, b) => a.n - b.n); body.innerHTML = `<div class="dim">${R.hit.length} of ${R.tot.length} controls used · ${T.pairs.size} combinations</div>` + rows.slice(0, 300).map((c) => `<div class="${c.n ? (c.bad ? 'bad' : 'ok') : 'dim'}">${String(c.n).padStart(4)} × ${esc(c.label)} <span class="dim">(${c.kind}${c.bad ? ', ' + c.bad + ' problems' : ''})</span></div>`).join(''); }
