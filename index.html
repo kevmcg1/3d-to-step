@@ -426,6 +426,10 @@ aside#panel .pad{padding-left:18px;padding-right:18px}
 #gridtog .tool{width:38px;height:38px}
 #gridtog .tool:not(.on){opacity:.6}
 </style>
+<script>/* no right-click, view-source (Ctrl+U) or dev tools (Ctrl+Shift+I) */
+document.addEventListener('contextmenu',function(e){e.preventDefault();});
+document.addEventListener('keydown',function(e){var k=(e.key||'').toLowerCase();if((e.ctrlKey||e.metaKey)&&(k==='u'||(e.shiftKey&&k==='i')))e.preventDefault();},true);
+</script>
 </head>
 <body>
 <header class="site-head" role="banner"><a href="https://kevmcg1.github.io/portfolio" target="_top" aria-label="Back to the portfolio at kevmcg1.github.io">KEVMCG1.GITHUB.IO</a></header>
