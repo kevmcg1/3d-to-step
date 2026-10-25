@@ -1,4 +1,4 @@
-// Gearworks self-test:  node tests/run.js      (needs `npm install` once, for three.js)
+// Gear Maker self-test:  node tests/run.js      (needs `npm install` once, for three.js)
 const GW = require('./harness.js')(['util.js','anim.js','profiles.js','geo.js','types.js','builders.js','calc.js','compat.js','mount.js','gears.js','brep.js','exporters.js','presets.js']);
 const THREE = globalThis.THREE;
 let pass = 0, fail = 0;
@@ -19,7 +19,7 @@ const variants = [
   ['spur', { holeN: 5, holeD: 6, chamfer: 0.4, z: 12, x: 0.5 }],
   ['helical', { helix: -30, bodyStyle: 'webbed', chamfer: 0.5 }],
   ['herring', { vgap: 0, helix: 30 }], ['herring', { vgap: 3, hubUp: 4, bodyStyle: 'webbed' }],
-  ['bevel', { cone: 20, z: 40, thick: 10 }], ['spiralbevel', { spiral: -40, cone: 70 }],
+  ['bevel', { cone: 20, z: 40, thick: 10 }], ['bevel', { bore: 60 }], ['spiralbevel', { spiral: -40, cone: 70 }],
   ['wormwheel', { throatR: 10, helix: -8 }], ['worm', { hand: 'left', starts: 3, keyW: 2, keyD: 1 }],
   ['internal', { helix: 20, chamfer: 0.5, z: 80 }], ['rack', { helix: 15, holeN: 4, holeD: 3, chamfer: 0.3 }],
   ['pulley', { flange: 'front', beltPreset: 'HTD 5M', z: 30 }], ['sprocket', { z: 9 }], ['sprocket', { z: 60, chainPreset: '#80 / 16A (25.4)' }],
@@ -45,9 +45,13 @@ r = GW.Compat.check(D('internal', { z: 60 }), D('spur', { z: 58 })); ok(!r.ok &&
 r = GW.Compat.check(D('spur', { z: 20 }), D('internal', { z: 25 })); ok(!r.ok, 'ring only 5 teeth bigger than pinion');
 r = GW.Compat.check(D('bevel', { z: 20, cone: 45 }), D('bevel', { z: 30, cone: 45 })); ok(!r.ok && r.issues.some(i => i.id === 'cone'), 'bevel cones follow tooth ratio');
 r = GW.Compat.check(D('sprocket'), D('sprocket', { chainPitch: 8 })); ok(!r.ok, 'sprocket pitch must match');
+r = GW.Compat.check(D('pulley', { flange: 'both', flangeD: 222 }), D('pulley', { meshOffset: 40 })); ok(!r.ok && r.issues.some(i => i.id === 'clearance' && i.optB), 'big pulley flanges would touch');
+r = GW.Compat.check(D('pulley', { flange: 'both', flangeD: 222 }), D('pulley', { meshOffset: 40 })); { const fx = r.issues.find(i => i.id === 'clearance').optB.B; r = GW.Compat.check(D('pulley', { flange: 'both', flangeD: 222 }), D('pulley', Object.assign({ meshOffset: 40 }, fx))); ok(r.ok, 'its fix clears the flanges'); }
 r = GW.Compat.check(D('worm', { starts: 1, wormDia: 16, m: 2 }), D('wormwheel', { helix: 3 })); ok(!r.ok && r.issues.some(i => i.id === 'helix'), 'worm wheel helix must equal lead angle');
 r = GW.Compat.check(D('elliptical'), D('elliptical')); ok(!r.ok && r.issues.some(i => i.id === 'phase'), 'elliptical needs the right tooth phase');
 r = GW.Compat.check(D('spline'), D('splinehub')); ok(r.ok, 'spline shaft fits spline hub');
+r = GW.Compat.check(D('spline'), D('splinehub', { ha: 1.6 })); ok(!r.ok && r.issues.some(i => i.id === 'clearance'), 'a deep-toothed spline hub collides with the shaft');
+r = GW.Compat.check(D('splinehub'), D('spline', { ha: 1.2 })); ok(!r.ok && r.issues.some(i => i.id === 'clearance' && i.optB), 'a deep-toothed spline shaft collides with the hub');
 ['spur', 'helical', 'herring', 'bevel', 'spiralbevel', 'worm', 'sprocket', 'pulley', 'cycloid', 'elliptical', 'crown', 'internal', 'rack'].forEach(t => {
   // whatever the other end, the auto-fix must end in a compatible pair
   GW.Compat.partnersOf(t).forEach(p => {
@@ -58,7 +62,7 @@ r = GW.Compat.check(D('spline'), D('splinehub')); ok(r.ok, 'spline shaft fits sp
   });
 });
 
-section('4. presets: every pair compatible, and no solid overlaps its neighbour while turning');
+section('4. presets: every pair compatible, and no solid overlaps its neighbor while turning');
 GW.Build.quality = 0;
 const inside = (mesh, p, ray, dir) => {
   ray.set(p, dir); const ds = ray.intersectObject(mesh, false).map(h => h.distance).sort((a, b) => a - b);
@@ -92,6 +96,22 @@ GW.Presets.filter(p => p.id !== 'showcase').forEach(p => {
   });
   ok(worst < 0.015 * minVol, `${p.id}: overlapping volume ${worst.toFixed(1)} mm³ while meshed (${(worst / minVol * 100).toFixed(2)}% of the smaller gear)`);
 });
+
+section('4b. a rack goes back and forth');
+{
+  GW.Gears.clear({ instant: true }); GW.Presets.find(p => p.id === 'rack').build(0, 0); GW.Layout.solveAll(); GW.Layout.update(0);
+  const R = GW.Gears.list.find(g => g.type === 'rack'), axis = new THREE.Vector3(1, 0, 0).applyQuaternion(R.rt.quat);
+  GW.Gears.spin = true; GW.Gears.speed = 1;
+  let lo = Infinity, hi = -Infinity, flips = 0, last = null, dir = 0;
+  for(let i = 0; i < 6000; i++){
+    GW.Layout.update(1 / 60);
+    const x = R.mesh.position.dot(axis); lo = Math.min(lo, x); hi = Math.max(hi, x);
+    if(last != null && Math.abs(x - last) > 1e-9){ const d = Math.sign(x - last); if(dir && d !== dir) flips++; dir = d; } last = x;
+  }
+  const L = R.z * Math.PI * R.m;
+  ok(flips >= 2, 'the rack reverses direction (' + flips + ' reversals in 100 s)');
+  ok(hi - lo < L && hi - lo > Math.PI * R.m, 'the rack stays within its own length (travels ' + (hi - lo).toFixed(1) + ' of ' + L.toFixed(1) + ' mm)');
+}
 
 section('5. export formats');
 GW.Build.quality = 1;

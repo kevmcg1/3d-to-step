@@ -1,5 +1,5 @@
 "use strict";
-/* Gearworks — geometry helpers on top of three.js. */
+/* Gear Maker — geometry helpers on top of three.js. */
 (function(){
 const U = GW.U;
 

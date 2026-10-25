@@ -1,5 +1,5 @@
 "use strict";
-/* Gearworks — where a child gear sits relative to its parent, and how it
+/* Gear Maker — where a child gear sits relative to its parent, and how it
    must turn when the parent turns.
 
    Every gear keeps a "base frame" (position + orientation, z = shaft) in g.rt.
@@ -24,7 +24,7 @@ const angleIn = (g, dir) => {
   return Math.atan2(l.y, l.x);
 };
 const count = g => g.type === 'worm' ? g.starts : g.z;
-// where, in a gear's own frame, its material tooth centres sit
+// where, in a gear's own frame, its material tooth centers sit
 const toothOffset = g => (g.type === 'internal' || g.type === 'splinehub') ? Math.PI / g.z : 0;
 const basisQuat = (x, y, z) => new T.Quaternion().setFromRotationMatrix(new T.Matrix4().makeBasis(x, y, z));
 const alignZ = k => new T.Quaternion().setFromUnitVectors(Z, k);

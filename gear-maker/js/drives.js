@@ -1,5 +1,5 @@
 "use strict";
-/* Gearworks — roller chains and timing belts joining sprocket / pulley pairs.
+/* Gear Maker — roller chains and timing belts joining sprocket / pulley pairs.
    They are drawn from instanced parts that slide round the pitch path every frame,
    and baked into ordinary triangles when you export. */
 (function(){

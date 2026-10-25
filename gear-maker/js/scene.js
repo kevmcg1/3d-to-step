@@ -1,5 +1,5 @@
 "use strict";
-/* Gearworks — the three.js world: renderer, lights, orbit camera, picking, smooth camera flights.
+/* Gear Maker — the three.js world: renderer, lights, orbit camera, picking, smooth camera flights.
    The canvas fills the stage between the two sidebars and follows its size. */
 (function(){
 const U = GW.U, T = THREE;
@@ -28,6 +28,8 @@ GW.Scene = {
 
     S.grid = new T.GridHelper(1600, 160, 0x2a2e35, 0x1c1f24);
     S.grid.rotation.x = Math.PI / 2; S.grid.position.z = -0.05;
+    S.grid.material.transparent = true; S.grid.material.depthWrite = false;
+    S.gridOn = true;
     S.scene.add(S.grid);
 
     S.root = new T.Group();           // gears
@@ -65,6 +67,15 @@ GW.Scene = {
     const tex = new T.CubeTexture(faces);
     tex.needsUpdate = true;
     return tex;
+  },
+
+  /* the floor grid fades in and out instead of snapping */
+  setGrid(on){
+    const S = GW.Scene, m = S.grid.material, from = m.opacity;
+    S.gridOn = on; if(on) S.grid.visible = true;
+    GW.Anim.tween(380, (p, e) => { m.opacity = from + ((on ? 1 : 0) - from) * e; }, { ease: 'out', key: 'grid', done: () => { if(!S.gridOn) S.grid.visible = false; } });
+    const b1 = document.getElementById('gridBtn'), b2 = document.getElementById('gridQuick');
+    [b1, b2].forEach(b => { if(b){ b.setAttribute('aria-pressed', on); const em = b.querySelector('em'); if(em) em.textContent = on ? 'on' : 'off'; } });
   },
 
   size(){ const c = GW.Scene.container; return { w: Math.max(c.clientWidth, 1), h: Math.max(c.clientHeight, 1) }; },

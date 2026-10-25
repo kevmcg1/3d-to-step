@@ -1,5 +1,5 @@
 "use strict";
-/* Gearworks — small tween engine: everything that moves (camera flights, gears popping in and out,
+/* Gear Maker — small tween engine: everything that moves (camera flights, gears popping in and out,
    selection glow, readout numbers) runs through here so it all shares one clock and one feel. */
 (function(){
 const ease = {

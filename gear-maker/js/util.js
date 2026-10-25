@@ -1,5 +1,5 @@
 "use strict";
-/* Gearworks — shared helpers. Everything hangs off one global: GW. */
+/* Gear Maker — shared helpers. Everything hangs off one global: GW. */
 var GW = window.GW = window.GW || {};
 
 GW.U = {

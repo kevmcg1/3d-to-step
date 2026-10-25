@@ -1,5 +1,5 @@
 "use strict";
-/* Gearworks — turns a gear's settings into 3D geometry.
+/* Gear Maker — turns a gear's settings into 3D geometry.
    Every builder works in the gear's own frame: the shaft is the z axis.
    build(g) -> { geo, info } where info carries the numbers other modules need
    (pitch radius, outer radius, warnings, ...). */
@@ -213,8 +213,10 @@ const B = GW.Build = {
   bevelBase(g, spiral){
     const pr = Prof.involute(B.toothArgs(g));
     const T = g.thick, r = pr.info.r, tanD = Math.tan(U.rad(g.cone));
-    const kmin = Math.max(0.12, (B.boreExtent(g) + 1.2) / pr.info.rf);
+    const kmin = 0.12;
     const kOf = s => Math.max(1 - s * tanD / r, kmin);
+    // the bore has to fit inside the SMALL end of the cone; it must not change the taper itself
+    g = B.fit(g, pr.info.rf * kOf(T), T, B._notes, { wall: 3 });
     const ks = Math.tan(U.rad(spiral)) / r;
     const xf = (px, py, s) => {
       const k = kOf(s);
