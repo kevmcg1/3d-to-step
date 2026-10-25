@@ -350,7 +350,6 @@ select.native{position:absolute;opacity:0;pointer-events:none;width:0;height:0}
 /* ---------- in-progress pill, undo/redo, repair report ---------- */
 .rep-card{max-height:360px;overflow-y:auto;overflow-x:hidden}.rep-i{min-width:0}.rep-i button{flex:none}
 .rep-i{display:flex;align-items:center;gap:8px;padding:4px 0 4px 26px;font-size:12px;color:var(--mut)}.rep-i .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.rep-i .ok{color:#7bd389}.rep-i .no{color:#f87171}
-.site-head .alpha-tag{position:absolute;right:14px;top:50%;transform:translateY(-50%);display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border:1px solid rgba(245,197,66,.5);border-radius:999px;background:rgba(245,197,66,.08);color:#f5c542;font-size:9.5px;font-weight:800;letter-spacing:.16em;text-transform:uppercase;white-space:nowrap}.site-head .alpha-tag::before{content:"";width:5px;height:5px;border-radius:50%;background:currentColor;box-shadow:0 0 6px currentColor}
 .wip-pill{margin-left:10px;padding:3px 9px;border-radius:999px;border:1px solid #f5c542;color:#f5c542;font-size:10.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;white-space:nowrap}
 .hist{display:flex;gap:2px;margin-right:4px}
 .hist .btn[disabled]{opacity:.32;pointer-events:none}
@@ -428,9 +427,10 @@ aside#panel .pad{padding-left:18px;padding-right:18px}
 #gridtog .tool{width:38px;height:38px}
 #gridtog .tool:not(.on){opacity:.6}
 </style>
+<style>/* status tag under the logo */.stable-row{display:flex;justify-content:center;margin:7px 0 0}.stable-tag{display:inline-flex;align-items:center;gap:5px;padding:3px 9px 3px 8px;border:1px solid rgba(245,197,66,.45);border-radius:999px;background:rgba(245,197,66,.08);color:#f5c542;font:800 9.5px/1 "Inter",system-ui,sans-serif;letter-spacing:.16em;text-transform:uppercase;white-space:nowrap}.stable-tag::before{content:"";width:5px;height:5px;border-radius:50%;background:currentColor;box-shadow:0 0 6px currentColor}</style>
 </head>
 <body>
-<header class="site-head" role="banner"><a href="https://kevmcg1.github.io/portfolio" target="_top" aria-label="Back to the portfolio at kevmcg1.github.io">KEVMCG1.GITHUB.IO</a><span class="alpha-tag" title="This is an alpha testing release of 3D File to STEP File">Alpha testing</span></header>
+<header class="site-head" role="banner"><a href="https://kevmcg1.github.io/portfolio" target="_top" aria-label="Back to the portfolio at kevmcg1.github.io">KEVMCG1.GITHUB.IO</a></header>
 <div id="app" data-mode="solid">
 <header>
   <div class="spacer"></div>
@@ -445,7 +445,7 @@ aside#panel .pad{padding-left:18px;padding-right:18px}
   <button class="btn primary hv" id="btnConvert" disabled><span class="ic" data-a="bob-down"><i class="fa-solid fa-download"></i></span><span>Export STEP</span></button>
 </header>
 <main>
-  <aside id="panel"><div class="logo side-logo"><h1 class="logo-mark" aria-label="3D file to STEP file"><span class="logo-brk" aria-hidden="true">[</span><span class="logo-stack" aria-hidden="true"><span class="logo-top">3D File</span><span class="logo-to">to</span><span class="logo-bot">STEP File</span></span><span class="logo-brk" aria-hidden="true">]</span></h1></div>
+  <aside id="panel"><div class="logo side-logo"><h1 class="logo-mark" aria-label="3D file to STEP file"><span class="logo-brk" aria-hidden="true">[</span><span class="logo-stack" aria-hidden="true"><span class="logo-top">3D File</span><span class="logo-to">to</span><span class="logo-bot">STEP File</span></span><span class="logo-brk" aria-hidden="true">]</span></h1><div class="stable-row"><span class="stable-tag" title="This project is in alpha testing">Alpha testing</span></div></div>
 <section class="sec open" id="sec-model"><div class="w"><button class="sec-h hv" data-toggle><span class="ic" data-a="flip"><i class="fa-solid fa-cube"></i></span><span>Model &amp; health</span><span class="ic chev" data-a=""><i class="fa-solid fa-chevron-down"></i></span></button><div class="sec-b"><div class="in"><div class="pad">
 <div class="fname" id="mName">No file loaded</div>
 <div class="stats" id="mStats"></div>
