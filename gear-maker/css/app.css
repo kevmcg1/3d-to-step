@@ -435,3 +435,78 @@ input[type=color]{width:46px;height:28px;border:1px solid var(--line-2);border-r
 @media (max-height:520px) and (orientation:landscape){
   .site-head{display:none}.feedback{max-width:420px;margin:0 0 0 auto}
 }
+
+/* ---------- sidebars: every section is a faded band in its own color (same scheme as the Shop Tool Sim) ----------
+   strongest at the left edge, fading out to the right */
+.side.left section{--sc:#8a8f97;margin:0 -16px;padding:16px;border-bottom:1px solid var(--line);background:linear-gradient(90deg,color-mix(in srgb,var(--sc) 22%,transparent) 0%,color-mix(in srgb,var(--sc) 8%,transparent) 45%,transparent 100%);box-shadow:inset 3px 0 0 color-mix(in srgb,var(--sc) 75%,transparent);transition:background-color .3s}
+.side.left section h2{color:color-mix(in srgb,var(--sc) 55%,#fff)}
+#secSamples{--sc:#e8b547}#secGears{--sc:#5b93ea}#secProject{--sc:#5fcf8a}
+.side.left section:last-of-type{border-bottom:1px solid var(--line)}
+.side.right .grp{--sc:#8a8f97;background:linear-gradient(90deg,color-mix(in srgb,var(--sc) 20%,transparent) 0%,color-mix(in srgb,var(--sc) 7%,transparent) 45%,transparent 100%);box-shadow:inset 3px 0 0 color-mix(in srgb,var(--sc) 75%,transparent)}
+.side.right .grp>button.gh{color:color-mix(in srgb,var(--sc) 55%,#fff)!important}
+.grp[data-g="Connection"]{--sc:#5fcf8a}.grp[data-g="Teeth"]{--sc:#e8b547}.grp[data-g="Profile"]{--sc:#a78bfa}
+.grp[data-g="Body"]{--sc:#5b93ea}.grp[data-g="Bore & hub"]{--sc:#fb923c}.grp[data-g="Placement"]{--sc:#f472b6}
+.grp[data-g="Motion"]{--sc:#2dd4bf}.grp[data-g="Appearance"]{--sc:#94a3b8}
+.grp[data-g="Worm"],.grp[data-g="Chain"],.grp[data-g="Belt"],.grp[data-g="Cycloid"],.grp[data-g="Ellipse"]{--sc:#22d3ee}
+.srow,.grow{background:rgba(13,14,16,.55)}
+@media (max-width:980px){.side.left section{margin:0 -16px}}
+
+/* ---------- units ---------- */
+.u{flex-wrap:wrap;row-gap:1px}
+.mmv{flex-basis:100%;text-align:right;font-size:10.5px;color:var(--dim);white-space:nowrap;line-height:1.2;min-height:0}
+.mmv:empty{display:none}
+.vp .ib.vp-unit{width:auto;min-width:32px;padding:0 8px;font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--yellow)}
+.vp .ib.vp-unit:hover{color:#000}
+.pr .u{flex-wrap:wrap}.pr input.num{flex:1 1 0;min-width:0;width:auto}.pr .un{width:auto;min-width:20px}
+.pr{grid-template-columns:100px minmax(0,1fr) 92px}.pr.wide1{grid-template-columns:100px minmax(0,1fr)}
+.rd b small.alt{display:block;margin-top:1px;font-size:10.5px;color:var(--dim);font-weight:500}
+.rd b{overflow:visible;white-space:normal;line-height:1.15}
+
+/* ---------- analysis dialogs ---------- */
+.an{font-size:13px;line-height:1.5}.an p{margin:0 0 10px}
+.anx{--sc:#5fcf8a;margin:0 0 12px;padding:12px 14px;border-radius:10px;background:linear-gradient(90deg,color-mix(in srgb,var(--sc) 14%,transparent),transparent 70%);box-shadow:inset 3px 0 0 color-mix(in srgb,var(--sc) 75%,transparent);animation:rowin .35s var(--ease) backwards}
+.anx.bad{--sc:#ff7a6e}
+.anx h4{margin:0 0 6px;font-size:13.5px}.anx h4 small{color:var(--muted);font-weight:500;margin-left:6px}
+.anx ul{margin:0 0 6px;padding-left:18px}.anx li{margin:2px 0}.anx .arrow{color:var(--dim);margin:0 4px}
+.anx .why,.anx .whyt,.anx .fixt{color:#c3c7ce;font-size:12.5px;margin:4px 0}
+.anx .issue{padding:8px 0;border-top:1px solid var(--line)}.anx .issue:first-of-type{border-top:0}
+.anx .what{font-weight:600}
+.an .mfoot{display:flex;gap:8px;justify-content:flex-end;margin-top:14px}
+
+.an .lead{font-size:13px;color:#c3c7ce;margin-bottom:14px}
+.anx h4 .verdict{float:right;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#ff9d93;background:rgba(255,122,110,.12);border-radius:999px;padding:2px 9px}
+.anx h5{display:flex;align-items:center;gap:8px;margin:14px 0 8px;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.anx h5 i{font-style:normal;display:inline-grid;place-items:center;width:18px;height:18px;border-radius:50%;background:#2c2f34;color:#fff;font-size:10.5px;letter-spacing:0}
+.probs{display:flex;flex-direction:column;gap:8px}
+.prob{padding:9px 11px;border-radius:9px;background:rgba(0,0,0,.25)}
+.prob .pt{font-weight:600;margin-bottom:4px}
+.cmp,.chg{width:100%;border-collapse:collapse;font-size:12.5px;margin:6px 0}
+.cmp th,.chg th{font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);text-align:left;padding:3px 8px}
+.cmp td,.chg td{padding:4px 8px;border-top:1px solid var(--line)}
+.chg .arrow{width:24px;color:var(--dim);text-align:center}.chg .to{color:var(--accent);font-weight:700}
+.opts{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.opt{padding:11px 12px;border-radius:10px;background:var(--raise);border:1px solid var(--line-2);display:flex;flex-direction:column;gap:2px}
+.opt.good{border-color:color-mix(in srgb,var(--ok) 50%,var(--line-2))}
+.opt.dead{opacity:.6}
+.opt h6{margin:0 0 4px;font-size:12.5px}
+.opt p{margin:2px 0 6px;color:#c3c7ce;font-size:12.5px}
+.opt .res{font-weight:600}.opt .res.ok{color:var(--ok)}.opt .res.bad{color:var(--warn)}
+.opt .also{margin-top:6px;color:var(--warn)}
+.opt button.apply{margin-top:auto;align-self:flex-start}
+.warns{margin:0;padding-left:18px;color:#c3c7ce}
+@media (max-width:760px){.opts{grid-template-columns:1fr}}
+
+/* ---------- labels on the gears: driver / driven ---------- */
+.glabels{position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:1;transition:opacity .3s}
+.glabels.off{opacity:0}
+.glabel{position:absolute;left:0;top:0;display:flex;align-items:center;gap:6px;white-space:nowrap;padding:3px 9px 3px 7px;border-radius:999px;background:rgba(13,14,16,.82);border:1px solid var(--lc,#5b93ea);font-size:11px;line-height:1.2;color:#fff;box-shadow:0 4px 14px rgba(0,0,0,.4);will-change:transform;transition:opacity .25s,border-color .25s}
+.glabel i{width:9px;height:9px;border-radius:50%;flex:none;box-shadow:0 0 0 2px rgba(255,255,255,.18)}
+.glabel b{font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--lc,#5b93ea)}
+.glabel span{color:#c3c7ce;font-weight:600}.glabel span:empty{display:none}
+.glabel.driver{--lc:#5b93ea}.glabel.driven{--lc:#5fcf8a}.glabel.shaft{--lc:#e8b547}.glabel.free{--lc:#94a3b8}
+.glabel.sel{background:rgba(24,30,42,.92);box-shadow:0 0 0 2px color-mix(in srgb,var(--lc) 40%,transparent),0 4px 14px rgba(0,0,0,.4)}
+@media (max-width:640px){.glabel{font-size:10px;padding:2px 7px 2px 6px}.glabel span{display:none}}
+
+.tolbox{padding:4px 0 8px}.tolbox p{margin:0 0 10px;font-size:12px;line-height:1.5;color:#c3c7ce}
+.tolbox .wide{width:100%}
+.grp[data-g="Tolerance"]{--sc:#f0b955}

@@ -91,6 +91,10 @@ async function dragRange(r, frac){
   r.dispatchEvent(new Event('input', { bubbles: true })); settle();
   window.dispatchEvent(new PointerEvent('pointerup', { bubbles: true })); r.dispatchEvent(new Event('change', { bubbles: true })); settle();
 }
+/* length settings show inches (or millimeters) in the box, while the model keeps millimeters */
+const isLenCtl = (g, k) => (Types.PARAMS[k] || Types.LINK_PARAMS[k] || [])[6] === 'mm' || (k === 'rpm' && g.type === 'rack');
+const toBox = (g, k, mm) => isLenCtl(g, k) ? GW.Units.d(mm) : mm;
+const fromBox = (g, k, v) => isLenCtl(g, k) ? GW.Units.fromD(v) : v;
 function typeNum(n, v){ n.focus(); n.value = String(v); n.dispatchEvent(new Event('input', { bubbles: true })); n.dispatchEvent(new Event('change', { bubbles: true })); n.blur(); settle(); }
 function pickOption(sel, i){ sel.selectedIndex = i; sel.dispatchEvent(new Event('change', { bubbles: true })); settle(); }
 const sel = () => UI.sel();
@@ -135,7 +139,7 @@ const Check = {
       ctlRows().forEach(([k, c]) => {
         const row = c.row, v = g[k];
         const n = $('input.num', row), s = $('select', row), cb = $('input[type=checkbox]', row), r = $('input[type=range]', row);
-        if (n && document.activeElement !== n && Number.isFinite(+v) && Math.abs(+n.value - v) > Math.max(1e-3, Math.abs(v) * 1e-4)) { good = false; find('control', 'error', `Control "${k}" shows ${n.value} but the gear has ${+(+v).toFixed(4)}`, diff(g)); }
+        if (n && document.activeElement !== n && Number.isFinite(+v) && Math.abs(fromBox(g, k, +n.value) - v) > (isLenCtl(g, k) ? Math.max(0.02, Math.abs(v) * 2e-3) : Math.max(1e-3, Math.abs(v) * 1e-4))) { good = false; find('control', 'error', `Control "${k}" shows ${n.value} but the gear has ${+(+v).toFixed(4)}`, diff(g)); }
         if (r && Number.isFinite(+v) && (+r.value < +r.min - 1e-9 || +r.value > +r.max + 1e-9)) { /* a typed value beyond the slider is clamped by the model: fine */ }
         if (s && String(s.value) !== String(v) && k !== 'type') { good = false; find('control', 'error', `Select "${k}" shows ${s.value} but the gear has ${v}`, diff(g)); }
         if (s && k === 'type' && s.value !== g.type) { good = false; find('control', 'error', `Gear type select shows ${s.value} but the gear is ${g.type}`, diff(g)); }
@@ -416,6 +420,184 @@ Check.responsive = async function(){
   }
 };
 
+
+/* ----------------------------------------------------------------- units, camera, colors, honest status */
+Check.units = async function(){
+  await freshTable(); const g = sel(), U2 = GW.Units, btn = $('#unitBtn');
+  if (!btn) { find('ui', 'error', 'There is no units button', ''); return; }
+  if (U2.mode !== 'in') { click(btn); settle(); }
+  if (U2.mode !== 'in' || !/IN/i.test(btn.textContent)) find('units', 'error', 'The units do not start in inches', btn.textContent);
+  const bare = (txt, unit) => { const t = txt.replace(/\([^)]*\)/g, ''); const m = unit === 'mm' ? /\d\s?mm\b/.exec(t) : /\d\s?in\b(?!g)/.exec(t); return m ? m[0] : null; };
+  const scan = (where) => {
+    ['#feedback', '#props'].forEach(sel2 => { const el = $(sel2); if (!el) return; const txt = el.innerText || ''; const b = bare(txt, where === 'in' ? 'mm' : 'in'); if (b) find('units', 'error', `A length is shown in ${where === 'in' ? 'millimeters' : 'inches'} with no ${where === 'in' ? 'inch' : 'metric'} value beside it (${b})`, sel2); });
+  };
+  // every length box agrees with the model, and shows the other unit in parentheses
+  settle(); let bad = 0;
+  ctlRows().forEach(([k, c]) => { if (!isLenCtl(g, k)) return; const n = $('input.num', c.row), mv = $('.mmv', c.row); if (!n || !mv) return; const mm = fromBox(g, k, +n.value); if (Math.abs(mm - g[k]) > Math.max(0.02, Math.abs(g[k]) * 2e-3)) { bad++; find('units', 'error', `"${k}" shows ${n.value} in but the gear has ${g[k]} mm`, ''); } if (!/^\(.*mm(\/s)?\)$/.test(mv.textContent)) { bad++; find('units', 'error', `"${k}" has no metric value in parentheses`, mv.textContent); } if (!/^in(\/s)?$/.test(($('.un', c.row) || {}).textContent)) { bad++; find('units', 'error', `"${k}" is not labeled in inches`, ''); } });
+  scan('in');
+  // typing an inch value sets the right number of millimeters
+  const thick = $('input.num', UI.ctl.thick.row); typeNum(thick, 0.5); settle(); if (Math.abs(g.thick - 12.7) > 0.01) find('units', 'error', `Typing 0.5 in made the thickness ${g.thick} mm, not 12.7`, ''); else ok('typing inches');
+  // the other way round
+  click(btn); settle(); await sleep(120);
+  if (U2.mode !== 'mm' || !/MM/i.test(btn.textContent)) find('units', 'error', 'The units button does not switch to millimeters', ''); else { const n = $('input.num', UI.ctl.thick.row); if (Math.abs(+n.value - g.thick) > 0.01) find('units', 'error', 'In millimeter mode the thickness box does not show millimeters', n.value); scan('mm'); ok('units switch'); }
+  click(btn); settle(); await sleep(80);
+  if (U2.mode !== 'in') find('units', 'error', 'The units button does not switch back to inches', '');
+};
+
+Check.camera = async function(){
+  await freshTable(); const S = GW.Scene;
+  if (!S.camera.isOrthographicCamera) { find('camera', 'error', 'The main view is not orthographic', S.camera.type); return; }
+  ok('main view is orthographic');
+  const THREE = window.THREE;
+  const frameOf = () => {
+    const r = S.renderer.domElement.getBoundingClientRect(), w = r.width, h = r.height, top = S.insetTop(), bot = S.insetBottom(), right = S.insetRight();
+    let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9; const v = new THREE.Vector3();
+    S.camera.updateMatrixWorld(true);
+    G().list.filter(g => g.mesh.visible).forEach(g => { g.mesh.updateMatrixWorld(true); const pos = g.mesh.geometry.attributes.position, st = Math.max(1, Math.floor(pos.count / 1500)); for (let i = 0; i < pos.count; i += st){ v.fromBufferAttribute(pos, i).applyMatrix4(g.mesh.matrixWorld).project(S.camera); const px = (v.x * .5 + .5) * w, py = (-v.y * .5 + .5) * h; x0 = Math.min(x0, px); x1 = Math.max(x1, px); y0 = Math.min(y0, py); y1 = Math.max(y1, py); } });
+    return { x0, x1, y0, y1, w, h, top, bot, right };
+  };
+  for (const view of ['iso', 'top', 'front', 'fit']){
+    if (view === 'fit') S.fit(); else S.view(view);
+    await sleep(1200); settle();
+    const f = frameOf(), tol = 3;
+    // the strip along the bottom may have changed height while the camera moved: wait for it to settle
+    await sleep(500); const f2 = frameOf();
+    const cut = f2.x0 < -tol || f2.x1 > f2.w - f2.right + tol || f2.y0 < f2.top - tol - 2 || f2.y1 > f2.h - f2.bot + tol;
+    if (cut) find('camera', 'error', `The ${view} view cuts something off or hides it behind the toolbar or strip`, `x ${f2.x0.toFixed(0)}–${f2.x1.toFixed(0)} of ${f2.w.toFixed(0)}, y ${f2.y0.toFixed(0)}–${f2.y1.toFixed(0)} within ${f2.top.toFixed(0)}–${(f2.h - f2.bot).toFixed(0)}`);
+    const fillX = (f2.x1 - f2.x0) / Math.max(1, f2.w - f2.right), fillY = (f2.y1 - f2.y0) / Math.max(1, f2.h - f2.bot - f2.top);
+    if (Math.max(fillX, fillY) < 0.82) find('camera', 'error', `The ${view} view is farther away than it needs to be (fills ${(Math.max(fillX, fillY) * 100).toFixed(0)}% of the free space)`, '');
+    if (!cut && Math.max(fillX, fillY) >= 0.82) ok(`${view} view is snug and complete`);
+  }
+};
+
+Check.sampleColors = function(p){
+  const cols = G().list.map(g => String(g.color).toLowerCase());
+  if (new Set(cols).size !== cols.length) find('sample', 'error', `Sample "${p.name}" has gears with the same color`, `${cols.length - new Set(cols).size} repeated`); else ok('every gear in a sample has its own color');
+};
+
+Check.status = async function(){
+  await freshTable(); const c = sel(), P = G().get(c.parentId);
+  const read = () => { c._st = null; UI._sv++; settle(); const v = UI.statusOf(c); return v; };
+  if (!read().ok) { find('status', 'error', 'The starting pair does not read as meshing', ''); return; }
+  // pull the gears apart with the extra center distance: it must stop reading as meshing, and the strip must say so
+  UI.queue(c, 'meshOffset', 4, false); UI.flush(); settle(); await sleep(60);
+  const v = read(); if (v.ok || !v.issues.some(i => i.id === 'apart')) find('status', 'error', 'Gears pulled 4 mm apart still read as meshing', JSON.stringify(v.issues.map(i => i.id)));
+  else { const strip = $('#feedback').innerText; if (!/extra center distance/i.test(strip)) find('status', 'error', 'The strip does not explain that the gears are pulled apart', ''); else ok('pulled-apart gears are reported'); }
+  UI.queue(c, 'meshOffset', 0, false); UI.flush(); settle(); if (!read().ok) find('status', 'error', 'Putting the extra distance back did not clear the warning', '');
+  // odd tooth shapes: whatever the numbers say, the real shapes must not be allowed to collide silently
+  for (const [who, k, val] of [[P, 'pa', 28], [c, 'ha', 1.5], [P, 'backlash', 0.8], [c, 'x', 0.8], [P, 'hf', 0.9], [c, 'fillet', 0.5]]){
+    const old = who[k]; UI.queue(who, k, val, false); UI.flush(); settle(); await sleep(40);
+    const st = read(); if (st.ok){ const ov = GW.Collide.overlap(P, c); if (ov > GW.Collide.limit(st.kind) * 1.5) find('status', 'error', `Reads as meshing but the real shapes overlap ${(ov * 100).toFixed(1)}% after setting ${k}=${val}`, diff(P) + ' + ' + diff(c)); else ok('status agrees with the real shapes'); }
+    UI.queue(who, k, old, false); UI.flush(); settle();
+  }
+};
+
+Check.sidebars = function(){
+  const bands = ['#secSamples', '#secGears', '#secProject'].map(q => $(q)).filter(Boolean);
+  const bad = bands.filter(e => !/gradient/.test(getComputedStyle(e).backgroundImage) || getComputedStyle(e).boxShadow === 'none');
+  if (bad.length) find('layout', 'error', 'A left sidebar section is not a colored band: ' + bad.map(e => e.id).join(', '), '');
+  const cols = new Set(bands.map(e => getComputedStyle(e).getPropertyValue('--sc').trim()));
+  if (cols.size < bands.length) find('layout', 'error', 'The left sidebar sections do not each have their own color', [...cols].join(' '));
+  const grps = $$('#props .grp'); const gbad = grps.filter(e => !/gradient/.test(getComputedStyle(e).backgroundImage));
+  if (gbad.length) find('layout', 'error', 'A right sidebar group is not a colored band: ' + gbad.map(e => e.dataset.g).join(', '), ''); else if (grps.length) ok('sidebars are colored bands');
+};
+
+
+Check.materials = async function(){
+  await freshTable(); UI.endDrag(); const g = sel(); const fin = UI.ctl.finish && $('select', UI.ctl.finish.row);
+  if (!fin) { find('materials', 'error', 'There is no Finish selector', ''); return; }
+  const expect = { brassM: 'turned', steelM: 'turned', aluM: 'brushed', plaP: 'layers', brass: 'smooth' };
+  for (const [f, surf] of Object.entries(expect)){
+    pickOption(fin, [...fin.options].findIndex(o => o.value === f)); settle(); await sleep(60); settle();
+    const m = g.mesh.material, hasUv = !!g.mesh.geometry.attributes.uv;
+    if (g.surface !== surf) find('materials', 'error', `Finish "${f}" did not set the ${surf} surface`, g.surface);
+    else if (surf !== 'smooth' && (!m.bumpMap || !hasUv)) find('materials', 'error', `Finish "${f}" has no texture on the mesh`, `bump ${!!m.bumpMap}, uv ${hasUv}`);
+    else if (surf === 'smooth' && m.bumpMap) find('materials', 'error', 'A smooth finish still has a texture', '');
+    else ok('material textures');
+  }
+  // the surface can also be chosen on its own, and survives a rebuild
+  const sf = UI.ctl.surface && $('select', UI.ctl.surface.row); if (!sf) { find('materials', 'error', 'There is no Surface texture selector', ''); return; }
+  pickOption(sf, [...sf.options].findIndex(o => o.value === 'layers')); settle(); UI.queue(g, 'thick', g.thick + 1, false); UI.flush(); settle(); await sleep(50);
+  if (!g.mesh.material.bumpMap || !g.mesh.geometry.attributes.uv) find('materials', 'error', 'The texture is lost when the gear is rebuilt', ''); else ok('texture survives a rebuild');
+};
+
+Check.matchExplain = async function(){
+  await freshTable(); const P = G().list.find(g => g.name === 'Driver'), C = G().list.find(g => g.name === 'Driven');
+  UI.select(P.id); settle(); UI.queue(P, 'm', 3, false); UI.queue(P, 'pa', 25, false); UI.flush(); settle(); await sleep(100); settle();
+  const btnE = $('#feedback [data-act="explain"]'), btnM = $('#feedback [data-act="match"]');
+  if (!btnE || !btnM) { find('match', 'error', 'No "Change other gears to match" / "Explain why" buttons when a meshed gear no longer fits', ''); return; }
+  const before = GW.History.snap();
+  click(btnE); settle(); const m1 = $('#modal').innerText;
+  if (!/What clashes/i.test(m1) || !/module/i.test(m1) || !/pressure angle/i.test(m1)) find('match', 'error', 'The explanation does not describe the module and pressure angle clash', m1.slice(0, 160));
+  else if (!/Option A/.test(m1) || !/Option B/.test(m1) || !/Option C/.test(m1) || !/Option D/.test(m1) || !$('#modal [data-ap]')) find('match', 'error', 'The explanation does not list every option (A to D) with Apply buttons', m1.slice(0, 200));
+  else if (!/After this the pair fits/.test(m1)) find('match', 'error', 'No option says it makes the pair fit', m1.slice(0, 200));
+  else ok('explanation lists every option');
+  if (/\d in \([^)]*\d in \(/.test(m1)) find('units', 'error', 'The explanation shows nested units like "in (x in (y mm))"', '');
+  if (GW.History.snap() !== before) find('match', 'error', '"Explain why" changed the table', '');
+  else ok('explain changes nothing');
+  click($('#mOk')); settle();
+  click($('#feedback [data-act="match"]')); settle(); await sleep(120); settle();
+  const m2 = $('#modal').innerText;
+  if (P.m !== 3 || P.pa !== 25) find('match', 'error', 'Matching changed the gear that was edited', `m ${P.m}, pa ${P.pa}`);
+  else if (C.m !== 3 || C.pa !== 25) find('match', 'error', 'The other gear was not changed to match', `m ${C.m}, pa ${C.pa}`);
+  else if (!/now match/i.test(m2) || !/Module/.test(m2)) find('match', 'error', 'There is no report of what was changed', m2.slice(0, 160));
+  else if (!UI.statusOf(C).ok) find('match', 'error', 'After matching, the pair still does not fit', '');
+  else ok('match other gears');
+  click($('#mUndo')); settle(); await sleep(150); settle();
+  const P2 = G().list.find(g => g.name === 'Driver'), C2 = G().list.find(g => g.name === 'Driven');
+  if (!(P2 && C2 && P2.m === 3 && C2.m === 2)) find('match', 'error', '"Undo these changes" did not put the other gear back', `driver m ${P2 && P2.m}, driven m ${C2 && C2.m}`); else ok('match can be undone');
+};
+
+Check.performance = async function(){
+  await freshTable(); const S = GW.Scene, fr = () => S.renderer.info.render.frame, prev = G().spin;
+  UI.endDrag(); UI.setPlaying(false);
+  { let n = 0; while (GW.Anim.list.length && n++ < 40) await sleep(200); if (GW.Anim.list.length) find('speed', 'error', 'Something keeps animating for 8 seconds with nothing happening', 'tweens ' + GW.Anim.list.map(t => t.key || '?').join(',')); }
+  await sleep(2600);                                     // the last few frames of a fade, then it must go quiet
+  const a = fr(); const s0 = (S._sig || '').split('|'); await sleep(1500); const idle = fr() - a; const s1 = (S._sig || '').split('|');
+  const names = ['theta', 'phi', 'dist', 'target x', 'target y', 'target z', 'strip height', 'width', 'height', 'layout version', 'selection', 'hover', 'grid', 'settings', 'grid fade', 'animations'];
+  if (idle > 5) find('speed', 'error', `The 3D view keeps redrawing while nothing moves (${idle} frames in 1.5 s)`, 'changing: ' + (s0.map((v, i) => v !== s1[i] ? names[i] : null).filter(Boolean).join(', ') || 'nothing in the signature (wake counter ' + S._wake + ', ' + G().list.length + ' gears, tweens ' + GW.Anim.list.length + ')'));
+  else ok('idle view does not redraw');
+  UI.setPlaying(true); await sleep(300); const b = fr(); await sleep(1000); const live = fr() - b;
+  if (live < 3) find('speed', 'error', `The view barely redraws while the gears spin (${live} frames in 1 s)`, '');
+  UI.setPlaying(false); await sleep(1200); UI.select(G().list[0].id); await sleep(100); const c = fr(); await sleep(700);
+  if (fr() - c < 1) find('speed', 'error', 'Selecting a gear does not redraw the view', ''); else ok('changes redraw');
+  UI.setPlaying(prev);
+  if (S.lite && GW.Perf.lite && S.renderer.getPixelRatio() > 1) find('speed', 'warn', 'Light mode is on but the view still renders at more than one pixel per pixel', '');
+};
+
+
+Check.labels = async function(){
+  await freshTable(); await sleep(300); settle();
+  const labs = $$('#glabels .glabel'), n = G().list.length;
+  if (labs.length !== n) find('labels', 'error', `${labs.length} labels for ${n} gears`, ''); 
+  const roles = labs.map(l => ($('b', l) || {}).textContent);
+  if (!roles.includes('Driver') || !roles.includes('Driven')) find('labels', 'error', 'The labels do not say which gear is the driver and which is driven', roles.join(', '));
+  const st = $('#stage').getBoundingClientRect();
+  labs.forEach(l => { const b = l.getBoundingClientRect(); if (l.style.display === 'none' || b.width < 10) find('labels', 'error', 'A gear label is hidden', l.textContent); else if (b.right < st.left - 4 || b.left > st.right + 4 || b.bottom < st.top - 4 || b.top > st.bottom + 4) find('labels', 'error', 'A gear label is outside the 3D view', l.textContent); });
+  // the label follows its gear: the same driver label sits above the driver gear
+  const drv = G().list.find(g => !g.parentId), v = drv.mesh.position.clone().project(GW.Scene.camera), cr = GW.Scene.renderer.domElement.getBoundingClientRect();
+  const gx = cr.left + (v.x * .5 + .5) * cr.width; const lab = labs.find(l => /Driver/.test(l.textContent)); if (lab){ const b = lab.getBoundingClientRect(); if (Math.abs((b.left + b.right) / 2 - gx) > 40) find('labels', 'error', 'The driver label is not over the driver gear', `${Math.round((b.left + b.right) / 2)} vs ${Math.round(gx)}`); else ok('labels sit on their gears'); }
+  // the toggle
+  click($('#labelBtn')); settle(); await sleep(350); if (parseFloat(getComputedStyle($('#glabels')).opacity) > 0.1) find('labels', 'error', 'The label button does not hide the labels', ''); click($('#labelBtn')); settle(); await sleep(350);
+  // adding a gear labels it, removing one removes the label
+  await Act.addGear('spur'); await sleep(250); settle(); if ($$('#glabels .glabel').length !== G().list.length) find('labels', 'error', 'A new gear did not get a label', ''); else ok('every gear is labeled');
+};
+
+Check.tolerance = async function(){
+  await freshTable(); const g = sel(), T2 = GW.Tol; const sel2 = UI.ctl.tolerance && $('select', UI.ctl.tolerance.row);
+  if (!sel2 || !$('#bestFit')) { find('tolerance', 'error', 'The Tolerance section has no process selector or best-fit button', ''); return; }
+  const vol = x => Math.abs(GW.Geo.analyze(x.mesh.geometry).volume);
+  pickOption(sel2, [...sel2.options].findIndex(o => o.value === 'ideal')); settle(); await sleep(60); const v0 = vol(g);
+  pickOption(sel2, [...sel2.options].findIndex(o => o.value === 'fdm')); settle(); await sleep(60); settle(); const v1 = vol(g);
+  if (!(v1 < v0 - 1e-6)) find('tolerance', 'error', 'A printed (FDM) part has the same bore as an ideal one', `${v0.toFixed(2)} vs ${v1.toFixed(2)}`); else ok('process changes the bore');
+  if (!/Bore is cut/.test($('#tolNums').textContent)) find('tolerance', 'error', 'The Tolerance section does not show the bore allowance', $('#tolNums').textContent);
+  G().list.forEach(x => { x.backlash = 0.02; }); UI._sv++; settle();
+  click($('#bestFit')); settle(); await sleep(80); settle();
+  const bad = G().list.filter(x => x.tolerance !== 'fdm' || x.backlash < T2.minBacklash(x) - 1e-6);
+  if (bad.length) find('tolerance', 'error', 'Best-fit tolerances did not set every gear', bad.map(x => x.name).join(', ')); else ok('best-fit tolerances');
+  const st = UI.statusOf(g.parentId ? g : G().children(g.id)[0] || g); if (st && st.issues.some(i => i.id === 'backlash')) find('tolerance', 'error', 'A backlash warning is left after best-fit', '');
+};
+
 const Act = {
   async addGear(type){ act('add gear', type); click($('#addBtn')); settle(); const card = $(`#modal .card[data-t="${type || pick(typeKeys)}"]`); if (!card) { find('ui', 'error', 'Add dialog is missing a gear type', type); UI.closeModal(); return; } click(card); settle(); after(sel()); },
   async loadSample(replace){ const p = pick(GW.Presets); act('sample', p.id + (replace ? ' (replace)' : ' (add)')); click($(replace ? `#sampleList .sbtn[data-id="${p.id}"]` : `#sampleList .sadd[data-id="${p.id}"]`)); await sleep(replace ? 420 + 40 * 38 : 50); settle(); await sleep(60); settle(); after(sel()); },
@@ -426,7 +608,7 @@ const Act = {
     const rows = ctlRows().filter(([k]) => k !== 'type' && k !== 'name'); if (!rows.length) return;
     const [k, c] = pick(rows), row = c.row, n = $('input.num', row), r = $('input[type=range]', row), s = $('select', row), cb = $('input[type=checkbox]', row), col = $('input[type=color]', row);
     const t0 = NOW();
-    if (r && n){ if (rnd() < 0.5){ const f = rnd(); act('drag', k + ' to ' + f.toFixed(2)); await dragRange(r, f); } else { const rg = Types.range(g.type, k), v = rg[0] + (rg[1] - rg[0]) * rnd(); act('type', k + ' = ' + v.toFixed(2)); typeNum(n, +v.toFixed(3)); } }
+    if (r && n){ if (rnd() < 0.5){ const f = rnd(); act('drag', k + ' to ' + f.toFixed(2)); await dragRange(r, f); } else { const rg = Types.range(g.type, k), v = rg[0] + (rg[1] - rg[0]) * rnd(); act('type', k + ' = ' + v.toFixed(2)); typeNum(n, +toBox(g, k, v).toFixed(4)); } }
     else if (s){ const i = Math.floor(rnd() * s.options.length); act('choose', k + ' = ' + s.options[i].value); pickOption(s, i); }
     else if (cb){ act('toggle', k); click(cb); cb.dispatchEvent(new Event('change', { bubbles: true })); settle(); }
     else if (col){ act('color', k); col.value = '#' + Math.floor(rnd() * 0xffffff).toString(16).padStart(6, '0'); col.dispatchEvent(new Event('input', { bubbles: true })); settle(); }
@@ -509,7 +691,7 @@ const PHASES = {
         const n = $('input.num', c.row), r = $('input[type=range]', c.row), s = $('select', c.row), cb = $('input[type=checkbox]', c.row);
         const base = {}; Object.keys(defaults(t)).forEach(x => { base[x] = g[x]; });
         const test = async fn => { try { await fn(); } catch (e) { find('error', 'error', `Exception while testing "${k}" of ${t}: ${e.message}`, (e.stack || '').split('\n').slice(0, 3).join(' | ')); } after(G().get(g.id)); };
-        if (r && n){ const rg = Types.range(g.type, k); for (const f of [0, 1, 0.5]){ act('control', `${t}.${k} → ${f === 0 ? 'min' : f === 1 ? 'max' : 'mid'}`); await test(async () => { typeNum(n, +(rg[0] + (rg[1] - rg[0]) * f).toFixed(3)); }); } await test(async () => dragRange(r, 0.5)); }
+        if (r && n){ const rg = Types.range(g.type, k); for (const f of [0, 1, 0.5]){ act('control', `${t}.${k} → ${f === 0 ? 'min' : f === 1 ? 'max' : 'mid'}`); await test(async () => { typeNum(n, +toBox(g, k, rg[0] + (rg[1] - rg[0]) * f).toFixed(4)); }); } await test(async () => dragRange(r, 0.5)); }
         else if (s){ const lim = Math.min(s.options.length, deep ? 12 : 4); for (let i = 0; i < lim; i++){ act('control', `${t}.${k} = ${s.options[i].value}`); if (k === 'type') continue; await test(async () => pickOption(s, i)); } }
         else if (cb){ act('control', `${t}.${k} toggle`); await test(async () => { click(cb); }); await test(async () => { click(cb); }); }
         // restore the gear so one extreme setting does not hide the next problem
@@ -555,7 +737,7 @@ const PHASES = {
       if (!G().list.length) find('sample', 'error', `Sample "${p.name}" built no gears`, ''); else ok('samples build');
       const bad = G().list.filter(g => { const s = UI.statusOf(g); return s && !s.ok; });
       if (bad.length) find('sample', 'error', `Sample "${p.name}" has gears that do not mesh: ${bad.map(g => g.name).join(', ')}`, bad.map(g => UI.statusOf(g).issues.filter(i => i.level === 'err').map(i => i.id).join('/')).join(' ; '));
-      Check.invariants(); Check.panels(); Check.feedback(); Check.allGeometry(); Check.blank();
+      Check.invariants(); Check.panels(); Check.feedback(); Check.allGeometry(); Check.blank(); Check.sampleColors(p);
       if (heavy || p.id !== 'showcase') Check.overlapAll();
       if (!heavy) { Check.exports('all', 'world', 'stl', false); }
       await yieldNow();
@@ -574,7 +756,7 @@ const PHASES = {
     for (let i = 0; i < 3; i++) await Act.exportDialog();
     Check.layout(); Check.blank(); Check.leaks(); await Check.jank();
     await Act.drawers();
-    T.phase = 'new features'; await Check.features(); await Check.undoRedo(); await Check.rackStroke(); await freshTable(); await Check.responsive(); await freshTable();
+    T.phase = 'new features'; await Check.features(); await Check.undoRedo(); await Check.rackStroke(); await Check.units(); await Check.camera(); await Check.status(); Check.sidebars(); await Check.materials(); await Check.matchExplain(); await Check.performance(); await Check.labels(); await Check.tolerance(); await freshTable(); await Check.responsive(); await freshTable();
   },
   async random(n){
     T.phase = 'random';

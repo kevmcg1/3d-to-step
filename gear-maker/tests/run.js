@@ -1,5 +1,5 @@
 // Gear Maker self-test:  node tests/run.js      (needs `npm install` once, for three.js)
-const GW = require('./harness.js')(['util.js','anim.js','profiles.js','geo.js','types.js','builders.js','calc.js','compat.js','mount.js','gears.js','brep.js','exporters.js','presets.js']);
+const GW = require('./harness.js')(['util.js','anim.js','profiles.js','geo.js','types.js','tol.js','builders.js','calc.js','compat.js','mount.js','tex.js','gears.js','brep.js','exporters.js','presets.js']);
 const THREE = globalThis.THREE;
 let pass = 0, fail = 0;
 const ok = (cond, msg) => { if(cond){ pass++; } else { fail++; console.log('  ✘ ' + msg); } };
@@ -19,7 +19,7 @@ const variants = [
   ['spur', { holeN: 5, holeD: 6, chamfer: 0.4, z: 12, x: 0.5 }],
   ['helical', { helix: -30, bodyStyle: 'webbed', chamfer: 0.5 }],
   ['herring', { vgap: 0, helix: 30 }], ['herring', { vgap: 3, hubUp: 4, bodyStyle: 'webbed' }],
-  ['bevel', { cone: 20, z: 40, thick: 10 }], ['bevel', { bore: 60 }], ['spiralbevel', { spiral: -40, cone: 70 }],
+  ['bevel', { cone: 20, z: 40, thick: 10 }], ['bevel', { m: 9.68, z: 30, thick: 9, holeN: 12, holeD: 3 }], ['bevel', { m: 5, z: 30, thick: 5, holeN: 12, holeD: 6 }], ['bevel', { bore: 60 }], ['spiralbevel', { spiral: -40, cone: 70 }],
   ['wormwheel', { throatR: 10, helix: -8 }], ['worm', { hand: 'left', starts: 3, keyW: 2, keyD: 1 }],
   ['internal', { helix: 20, chamfer: 0.5, z: 80 }], ['rack', { helix: 15, holeN: 4, holeD: 3, chamfer: 0.3 }],
   ['pulley', { flange: 'front', beltPreset: 'HTD 5M', z: 30 }], ['sprocket', { z: 9 }], ['sprocket', { z: 60, chainPreset: '#80 / 16A (25.4)' }],
@@ -61,6 +61,17 @@ r = GW.Compat.check(D('splinehub'), D('spline', { ha: 1.2 })); ok(!r.ok && r.iss
     ok(res.ok, `auto-fix ${t} + ${p} -> ${res.issues.filter(i => i.level === 'err').map(i => i.id)}`);
   });
 });
+
+{
+  const A = GW.Types.defaults('spur'), B = GW.Types.defaults('spur'); A.z = 18; B.z = 27;
+  const at = off => { B.meshOffset = off; return GW.Compat.check(A, B, { kind: 'mesh' }); };
+  ok(at(0).ok && at(0.3).ok, 'a small extra center distance still meshes');
+  const far = at(3);
+  ok(!far.ok && far.issues.some(i => i.id === 'apart' && i.optB && i.optB.B.meshOffset === 0), 'gears pulled far apart are reported, with a fix');
+  const wA = GW.Types.defaults('worm'), wB = GW.Types.defaults('wormwheel'); wB.meshOffset = 5;
+  ok(!GW.Compat.check(wA, wB, { kind: 'mesh' }).ok, 'a worm pulled away from its wheel is reported');
+  B.meshOffset = 0;
+}
 
 section('4. presets: every pair compatible, and no solid overlaps its neighbor while turning');
 GW.Build.quality = 0;
@@ -111,6 +122,50 @@ section('4b. a rack goes back and forth');
   const L = R.z * Math.PI * R.m;
   ok(flips >= 2, 'the rack reverses direction (' + flips + ' reversals in 100 s)');
   ok(hi - lo < L && hi - lo > Math.PI * R.m, 'the rack stays within its own length (travels ' + (hi - lo).toFixed(1) + ' of ' + L.toFixed(1) + ' mm)');
+}
+
+section('4c. materials and sample colors');
+{
+  const F = GW.Types.FINISH;
+  ok(F.brassM.surface === 'turned' && F.steelM.surface === 'turned' && F.aluM.surface === 'brushed' && F.plaP.surface === 'layers', 'machined brass / steel / aluminum and 3D printed PLA exist');
+  GW.Gears.clear({ instant: true });
+  const g = GW.Gears.add('spur', {}, { instant: true });
+  ok(g.surface === 'smooth', 'a new gear is smooth');
+  GW.Gears.set(g, 'finish', 'plaP');
+  ok(g.surface === 'layers' && g.metal === 0, 'choosing 3D printed PLA sets the layer-line surface');
+  GW.Gears.set(g, 'finish', 'steelM');
+  ok(g.surface === 'turned' && GW.Gears.toJSON().gears[0].surface === 'turned', 'the surface is saved with the project');
+  GW.Presets.forEach(p => {
+    GW.Gears.clear({ instant: true }); p.build(0, 0);
+    const cols = GW.Gears.list.map(x => x.color);
+    ok(new Set(cols).size === cols.length, `${p.id}: every gear has its own color (${cols.length})`);
+  });
+}
+
+section('4d. units: inches first, metric in parentheses');
+{
+  const Un = GW.Units;
+  ok(Un.mode === 'in', 'inches by default');
+  ok(Un.text('Center distance 45 mm') === 'Center distance 1.772 in (45 mm)', 'sentences convert: ' + Un.text('Center distance 45 mm'));
+  ok(Un.text('0.5 mm of 8 mm') === '0.0197 in (0.5 mm) of 0.315 in (8 mm)', 'several lengths in one sentence');
+  ok(Un.text('12 mm/s') === '0.4724 in/s (12 mm/s)', 'speeds convert');
+  ok(Math.abs(Un.fromD(Un.d(37.3)) - 37.3) < 1e-9 && Math.abs(Un.fromD(1) - 25.4) < 1e-9, 'round trip between inches and millimeters');
+  Un.set('mm'); ok(Un.text('45 mm') === '45 mm (1.772 in)', 'millimeter mode reverses the order'); Un.set('in');
+}
+
+section('4e. tolerances');
+{
+  const T2 = GW.Tol, g = GW.Types.defaults('spur');
+  ok(g.tolerance === 'machined' && T2.allowance(g).bore === 0.02, 'gears start as CNC machined with a 0.02 mm bore allowance');
+  g.tolerance = 'fdm'; g.keyW = 2; g.keyD = 1; g.bore = 6; const q = T2.apply(g);
+  ok(Math.abs(q.bore - 6.3) < 1e-9 && Math.abs(q.keyW - 2.25) < 1e-9 && q.keyD > 1, 'FDM opens the bore by 0.3 mm and the keyway by 0.25 mm');
+  ok(T2.minBacklash(g) >= 0.25 && T2.minBacklash({ type: 'spur', m: 5, tolerance: 'machined' }) === 0.2, 'minimum backlash grows with the process and the tooth size');
+  g.tolerance = 'ideal'; ok(T2.apply(g) === g && T2.minBacklash(g) === 0, 'ideal adds nothing');
+  const a = GW.Types.defaults('spur'), b = GW.Types.defaults('spur'); b.tolerance = 'fdm'; b.backlash = 0.05;
+  ok(GW.Compat.check(a, b, { kind: 'mesh' }).issues.some(i => i.id === 'backlash' && i.level === 'warn'), 'too little backlash for the process is flagged');
+  b.backlash = 0.3; ok(!GW.Compat.check(a, b, { kind: 'mesh' }).issues.some(i => i.id === 'backlash'), '... and not once it is enough');
+  const m = GW.Types.defaults('spur'); m.bore = 6; m.tolerance = 'fdm'; const an = GW.Geo.analyze(GW.Build.build(m).geo), m0 = Object.assign({}, m, { tolerance: 'ideal' }), an0 = GW.Geo.analyze(GW.Build.build(m0).geo);
+  ok(an.open === 0 && an.volume < an0.volume, 'the printed bore is bigger (less material) and the mesh stays closed');
 }
 
 section('5. export formats');

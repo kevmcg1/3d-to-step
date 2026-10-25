@@ -271,6 +271,19 @@ const Compat = GW.Compat = {
       if(hub.backlash < 0.01 && (A.backlash + B.backlash) < 0.01) add('warn', 'backlash', 'Zero clearance — printed or machined parts will not slide. Add 0.1 mm or more.');
     }
 
+    // every other toothed pair has one right distance: moving off it by more than a fraction of a tooth stops them meshing
+    if(link.kind !== 'shaft' && ['bevel', 'crown', 'worm', 'cyc', 'ell', 'ring', 'rack'].includes(out.kind)){
+      const m = (out.kind === 'worm' ? (A.type === 'worm' ? B : A).m : A.m) || 1, off = B.meshOffset || 0;
+      const lim = out.kind === 'ell' ? 0.6 : 0.35 * m;
+      if(Math.abs(off) > lim) issues.push({ level: 'err', id: 'apart', text: `<b>extra center distance</b> — the gears are ${off > 0 ? 'pulled' : 'pushed'} ${need(U.fmt(Math.abs(off), 2), ' mm')} ${off > 0 ? 'apart' : 'together'} from their meshing distance, so the teeth ${off > 0 ? 'no longer reach' : 'jam into'} each other. Put it back to ${need('0', ' mm')}.`, optB: { B: { meshOffset: 0 } }, optA: null });
+    }
+    // backlash below what the manufacturing process needs: printed or machined teeth would bind
+    if(out.supported && ['ext', 'ring', 'rack', 'bevel', 'crown', 'worm', 'cyc', 'ell'].includes(out.kind) && GW.Tol){
+      [A, B].forEach(gr => {
+        const mb = GW.Tol.minBacklash(gr);
+        if(mb > 0 && gr.backlash < mb - 1e-6) issues.push({ level: 'warn', id: 'backlash', text: `${gr.name || 'Gear'} has ${need(U.fmt(gr.backlash, 3), ' mm')} of backlash but a ${GW.Tol.of(gr).label.replace(/ \(.*/, '')} part needs at least ${need(U.fmt(mb, 3), ' mm')}, or the teeth will bind. "Set best-fit tolerances" fixes it on every gear.`, optB: null, optA: null });
+      });
+    }
     out.ok = !issues.some(i => i.level === 'err');
     return out;
   },
@@ -299,8 +312,9 @@ const Compat = GW.Compat = {
     const worst = Math.min(clr1, clr2);
     if(worst < -0.001) issues.push({ level: 'err', id: 'clearance', text: `<b>tip clearance</b> — a tooth tip reaches ${U.fmt(-worst, 2)} mm into the other gear's root. Increase dedendum (now ${A.hf} / ${B.hf}) or reduce addendum.`, optB: null, optA: null });
     else info('Tip clearance', `${U.fmt(worst, 2)} mm`);
-    const sinAw = Math.sin(cd.aw);
-    const eps = (Math.sqrt(Math.max(rA.ra ** 2 - rA.rb ** 2, 0)) + Math.sqrt(Math.max(rB.ra ** 2 - rB.rb ** 2, 0)) - cd.a * sinAw) / (Math.PI * A.m * Math.cos(U.rad(A.pa)));
+    // working angle at the REAL center distance: pulling the gears apart (extra center distance) lowers the overlap
+    const awA = Math.acos(U.clamp((rA.rb + rB.rb) / a, -1, 1)), sinAw = Math.sin(awA);
+    const eps = (Math.sqrt(Math.max(rA.ra ** 2 - rA.rb ** 2, 0)) + Math.sqrt(Math.max(rB.ra ** 2 - rB.rb ** 2, 0)) - a * sinAw) / (Math.PI * A.m * Math.cos(U.rad(A.pa)));
     let total = eps;
     if(A.type === 'helical' || A.type === 'herring'){
       const beta = Math.abs(U.rad(A.helix));
@@ -308,7 +322,8 @@ const Compat = GW.Compat = {
       total = eps + overlap;
       info('Contact ratio', `${U.fmt(eps, 2)} profile + ${U.fmt(overlap, 2)} overlap = ${U.fmt(total, 2)}`);
     } else info('Contact ratio', U.fmt(eps, 2));
-    if(total < 1.1) issues.push({ level: 'warn', id: 'contact', text: `Contact ratio is only ${U.fmt(total, 2)}. The load jumps between teeth; 1.2 or more is smooth.`, optB: null, optA: null });
+    if(total < 1.0 && Math.abs(B.meshOffset || 0) > 0.01) issues.push({ level: 'err', id: 'apart', text: `<b>extra center distance</b> — the gears are pulled ${need(U.fmt(B.meshOffset, 2), ' mm')} off their meshing distance, so the teeth barely reach each other (contact ratio ${U.fmt(total, 2)}) and will skip. Put it back to ${need('0', ' mm')}.`, optB: { B: { meshOffset: 0 } }, optA: null });
+    else if(total < 1.1) issues.push({ level: 'warn', id: 'contact', text: `Contact ratio is only ${U.fmt(total, 2)}. The load jumps between teeth; 1.2 or more is smooth.`, optB: null, optA: null });
   },
 
   /* Merge the fixes for every error into {A:{}, B:{}}.
@@ -330,7 +345,7 @@ const Compat = GW.Compat = {
           Object.assign(plan[who], opt[who]);
           const cur = who === 'A' ? a : b;
           const next = opt[who].type ? GW.Types.convert(cur, opt[who].type) : cur;
-          const merged = Object.assign({}, next, opt[who]);
+          const merged = Object.assign({}, next, opt[who], { info: null });      // the old measurements no longer apply to a changed gear
           if(who === 'A') a = merged; else b = merged;
           progressed = true;
         });

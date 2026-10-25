@@ -30,6 +30,18 @@ Modeled on the Shop Tool Sim:
 - **Bottom strip**: whether the selected gear meshes, exactly what it needs, and its speed, ratio, center distance and contact ratio.
 - **Phones and small laptops**: the sidebars become drawers, the toolbar shrinks, and the bottom strip starts folded on a phone. A rack and pinion moves back and forth within the rack's length.
 
+## Also in the box
+
+- **Inches first.** Every length is shown in inches with the metric value in parentheses (`1.772 in (45 mm)`), in the boxes, the feedback strip, messages and exports info. The **IN / MM** button in the toolbar flips it, and typing works in whichever unit is showing. Everything inside stays in millimeters.
+- **Orthographic camera**, so parallel lines stay parallel and sizes read true. The fit (and the Isometric, Top and Front buttons) goes as close as it can without cutting anything off or hiding it behind the toolbar or the strip, and keeps following when the strip changes height until you move the camera yourself.
+- **Labels** on every gear say which is the **driver** and which is **driven** (or on the same shaft); a toolbar button hides them.
+- **Colors**: every gear in a sample gets its own color.
+- **Materials**: machined brass, steel and aluminum (turned or brushed tool marks) and 3D printed PLA (layer lines), plus a separate *Surface texture* setting.
+- **Tolerances**: each gear has a process (ideal, CNC machined, resin print, filament print). The process opens the bore and keyway by its allowance and sets the smallest backlash that will run; *Set best-fit tolerances for everything* applies it to every gear on the table.
+- **When a gear stops fitting**: the strip offers *Change other gears to match* (changes the gears around it, leaves the edited one alone, then shows exactly what changed, with an Undo) and *Explain why* (what clashes, why it matters, and every option: change the other gear, change this one, un-mesh, or pick another partner type, each with a table of changes and an Apply button). Nothing changes until you press one.
+- **Honest status**: after the rules say a pair fits, the real shapes are tested for overlap while turning, and gears pulled apart with extra center distance are reported.
+- **Fast on small laptops**: light mode is chosen from the hardware (few cores, little memory, phone, software rendering) or switches itself on when frames are slow. It turns off antialiasing, draws at one pixel per pixel and 30 frames a second, and the view does not redraw at all while nothing moves.
+
 ## Every setting is editable
 
 Click a gear in the 3D view (or the Gears tab). The Edit tab lists every setting for that type, each with a slider and an exact number box:
@@ -69,7 +81,7 @@ Checks that every gear type (and many setting combinations) builds a closed mesh
 
 Press the backtick key (`` ` ``) to open it, or add `?dev=quick` (also `standard`, `thorough`, `problems`, `free`) to the address and it starts by itself.
 
-It drives the real controls on its own and checks, as it goes: errors, closed meshes, teeth that really interleave (sampled overlap while turning), auto-fix producing compatible pairs, the bottom strip agreeing with the model, every control showing the true value and every setting having a control, STL / OBJ / STEP / zip output, saved projects that read back, leaked geometry, blank views, clipped controls, contrast and slow frames, plus the newer features: undo and redo (buttons and keys), sample explanations, the preview card, status-card icons, American spelling, the toolbar placement, the rack's back-and-forth travel, and the layout at laptop, tablet and phone sizes. The report lists what broke with a seed, the last actions (the recipe) and a guess at the cause. **Aim at problems** replays what broke before and shrinks each failure to its shortest recipe.
+It drives the real controls on its own and checks, as it goes: errors, closed meshes, teeth that really interleave (sampled overlap while turning), auto-fix producing compatible pairs, the bottom strip agreeing with the model, every control showing the true value and every setting having a control, STL / OBJ / STEP / zip output, saved projects that read back, leaked geometry, blank views, clipped controls, contrast and slow frames, plus the newer features (inches and millimeters, the orthographic fit, labels, materials, tolerances, match / explain, undo and redo, idle drawing): undo and redo (buttons and keys), sample explanations, the preview card, status-card icons, American spelling, the toolbar placement, the rack's back-and-forth travel, and the layout at laptop, tablet and phone sizes. The report lists what broke with a seed, the last actions (the recipe) and a guess at the cause. **Aim at problems** replays what broke before and shrinks each failure to its shortest recipe.
 
 ## How it is organized
 

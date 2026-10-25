@@ -11,13 +11,21 @@ $('openFile').onchange = e => { if(e.target.files[0]) GW.UI.loadProject(e.target
 let legendGone = false;
 $('stage').addEventListener('pointerdown', () => { if(!legendGone){ legendGone = true; setTimeout(() => $('legend').classList.add('gone'), 2500); } }, { once: true });
 
+GW.Labels.init($('stage'));
 GW.UI.startPair(true);
 GW.Scene.fit(true);
 GW.History.reset();
+/* the first fit ran before the page had finished laying out: fit again once it has, until the person moves the camera */
+let moved = false;
+$('stage').addEventListener('pointerdown', () => { moved = true; }, { once: true });
+$('stage').addEventListener('wheel', () => { moved = true; }, { once: true, passive: true });
+[150, 600, 1400].forEach(ms => setTimeout(() => { if(!moved) GW.Scene.fit(true); }, ms));
+window.addEventListener('resize', () => { if(!moved) GW.Scene.fit(true); });
 
 let last = performance.now(), seen = -1, readT = 0;
 (function loop(now){
   requestAnimationFrame(loop);
+  if(document.hidden) return;
   const dt = Math.min((now - last) / 1000, 0.05); last = now;
   GW.Anim.update(now);
   GW.Layout.update(dt);
@@ -27,7 +35,8 @@ let last = performance.now(), seen = -1, readT = 0;
   const sel = GW.UI.sel(), hg = GW.Scene._helperGroup;
   if(sel && hg){ hg.position.copy(sel.mesh.position); hg.quaternion.copy(sel.rt.quat); }
   if(sel && sel.parentId && now - readT > 400){ readT = now; GW.UI.updateSpeedReadout(sel); }
-  GW.Scene.render();
+  GW.Scene.followInset();
+  GW.Scene.render(now);
 })(last);
 
 /* Dev tool: press the backtick key (`) to open the automatic tester (devtest.js, loaded on first use).

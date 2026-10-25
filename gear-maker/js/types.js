@@ -38,6 +38,10 @@ const FINISH = {
   black:    { label: 'Black oxide',  color: '#3a3f46', metal: 0.50, rough: 0.55 },
   nylon:    { label: 'Nylon white',  color: '#e9e6dc', metal: 0.00, rough: 0.60 },
   pla:      { label: 'PLA orange',   color: '#e8742c', metal: 0.00, rough: 0.50 },
+  brassM:   { label: 'Machined brass',     color: '#c9a24b', metal: 0.85, rough: 0.34, surface: 'turned' },
+  steelM:   { label: 'Machined steel',     color: '#9aa4b0', metal: 0.90, rough: 0.30, surface: 'turned' },
+  aluM:     { label: 'Machined aluminum',  color: '#c8ced6', metal: 0.88, rough: 0.36, surface: 'brushed' },
+  plaP:     { label: '3D printed PLA',     color: '#e8742c', metal: 0.00, rough: 0.62, surface: 'layers' },
   petg:     { label: 'PETG blue',    color: '#3b82c4', metal: 0.05, rough: 0.35 },
   custom:   { label: 'Custom color', color: null }
 };
@@ -119,7 +123,10 @@ const PARAMS = {
   rpm:        ['Speed', 'num', 'Motion', -300, 300, 0.5, 'rpm', 'Driving speed (− reverses). Meshed gears follow their parent.'],
 
   finish:     ['Finish', 'sel', 'Appearance', null, null, null, Object.keys(FINISH)],
+  surface:    ['Surface texture', 'sel', 'Appearance', null, null, null, ['smooth', 'turned', 'brushed', 'layers'], 'How the surface looks: smooth, machined with tool marks, brushed, or the layer lines of a 3D print.'],
   color:      ['Color', 'color', 'Appearance'],
+  tolerance:  ['Process', 'sel', 'Tolerance', null, null, null, ['ideal', 'machined', 'sla', 'fdm'], 'How the part is made. It sets how much bigger the bore and keyway are cut than the shaft, and the smallest backlash that will run.'],
+  tolAdd:     ['Extra fit clearance', 'num', 'Tolerance', 0, 1, 0.01, 'mm', 'Added to the process allowance on the bore diameter and keyway. Use it for a looser or tighter fit.'],
   metal:      ['Metalness', 'num', 'Appearance', 0, 1, 0.05, ''],
   rough:      ['Roughness', 'num', 'Appearance', 0, 1, 0.05, ''],
   opacity:    ['Opacity', 'num', 'Appearance', 0.1, 1, 0.05, ''],
@@ -181,14 +188,14 @@ const BASE = {
   rollR: 6, majorA: 25, ecc: 0.3, phase: 0,
   px: 0, py: 0, pz: 0, rx: 0, ry: 0, rz: 0,
   rpm: 12,
-  finish: 'brass', color: '#c9a24b', metal: 0.55, rough: 0.45, opacity: 1, wire: false, visible: true,
+  tolerance: 'machined', tolAdd: 0, finish: 'brass', surface: 'smooth', color: '#c9a24b', metal: 0.55, rough: 0.45, opacity: 1, wire: false, visible: true,
   parentId: null, linkKind: 'mesh', meshAngle: 0, shaftAngle: 90, meshOffset: 0, shaftOffset: 0, shaftPhase: 0
 };
 
 /* Always-available (not type specific) */
-const ALWAYS = ['px', 'py', 'pz', 'rx', 'ry', 'rz', 'rpm', 'finish', 'color', 'metal', 'rough', 'opacity', 'wire', 'visible'];
+const ALWAYS = ['px', 'py', 'pz', 'rx', 'ry', 'rz', 'rpm', 'tolerance', 'tolAdd', 'finish', 'surface', 'color', 'metal', 'rough', 'opacity', 'wire', 'visible'];
 
-const GROUP_ORDER = ['Identity', 'Teeth', 'Profile', 'Body', 'Bore & hub', 'Worm', 'Chain', 'Belt', 'Cycloid', 'Ellipse', 'Mesh', 'Placement', 'Motion', 'Appearance'];
+const GROUP_ORDER = ['Identity', 'Teeth', 'Profile', 'Body', 'Bore & hub', 'Tolerance', 'Worm', 'Chain', 'Belt', 'Cycloid', 'Ellipse', 'Mesh', 'Placement', 'Motion', 'Appearance'];
 
 GW.Types = {
   TYPES, PARAMS, LINK_PARAMS, BASE, ALWAYS, GROUP_ORDER, CHAIN, BELT, FINISH,
