@@ -87,7 +87,7 @@ const Xf = GW.Xform = {
   sync(){
     const tc = Xf.tc; if(!tc) return;
     const S = GW.Scene, g = GW.UI.sel(), root = Xf.rootOf(g);
-    const shown = !!(g && g.mesh.visible) && !(GW.Spot && GW.Spot.active);
+    const shown = !!(g && g.mesh.visible) && !(GW.Spot && GW.Spot.active) && !(GW.Tools && GW.Tools.mode);
     if(Xf.pendingF != null && Xf.drag){ Xf.applyScale(Xf.pendingF, true); Xf.pendingF = null; }
     if(shown && Xf.mode){
       if(tc.object !== Xf.pivot) tc.attach(Xf.pivot);

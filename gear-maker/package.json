@@ -5,7 +5,7 @@
   "license": "MIT",
   "scripts": {
     "start": "cd .. && python3 -m http.server 8080",
-    "test": "node tests/run.js"
+    "test": "node tests/run.js && node tests/audit-samples.js && node tests/roles.js && node tests/wizard.js && node tests/wizards.js"
   },
   "devDependencies": { "three": "0.128.0" }
 }

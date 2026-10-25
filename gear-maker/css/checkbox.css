@@ -1,0 +1,26 @@
+/* Checkboxes, the same in every tool: round and smooth. The fill grows from the middle, the tick draws itself in with a little spring,
+   and the whole thing dips when it is pressed. A highlight card (--c) fills in its own color. */
+input[type=checkbox]{
+  --ck:var(--c,var(--accent,#5b93ea));
+  appearance:none;-webkit-appearance:none;position:relative;display:inline-grid;place-content:center;flex:none;box-sizing:border-box;
+  width:18px;height:18px;margin:0;padding:0;border:2px solid #5a5f67;border-radius:50%;cursor:pointer;vertical-align:-4px;
+  background:radial-gradient(circle closest-side,var(--ck) 98%,transparent 100%) center/0% 0% no-repeat;background-origin:border-box;
+  transition:background-size .3s cubic-bezier(.3,1.35,.5,1),border-color .2s ease,box-shadow .28s ease,transform .16s cubic-bezier(.3,1.5,.5,1);
+}
+input[type=checkbox]::after{
+  content:"";width:9px;height:5px;margin-top:-2px;border:solid #0b1320;border-width:0 0 2.5px 2.5px;border-radius:1px;
+  transform:rotate(-45deg) scale(0);opacity:0;
+  transition:transform .32s cubic-bezier(.3,1.6,.5,1) .05s,opacity .16s ease .05s;
+}
+input[type=checkbox]:hover{border-color:#8a8f97;box-shadow:0 0 0 4px rgba(255,255,255,.06)}
+input[type=checkbox]:active{transform:scale(.86)}
+input[type=checkbox]:checked{background-size:100% 100%;border-color:var(--ck);box-shadow:0 0 0 4px color-mix(in srgb,var(--ck) 20%,transparent)}
+input[type=checkbox]:checked:hover{border-color:var(--ck);box-shadow:0 0 0 5px color-mix(in srgb,var(--ck) 28%,transparent)}
+input[type=checkbox]:checked::after{transform:rotate(-45deg) scale(1);opacity:1}
+input[type=checkbox]:focus-visible{outline:2px solid var(--accent,#5b93ea);outline-offset:3px}
+input[type=checkbox]:disabled{opacity:.4;cursor:default}
+label.chk input[type=checkbox],.hlcard input[type=checkbox]{width:18px;height:18px}
+.hlcard input[type=checkbox]{margin:1px 0 0}
+@media (prefers-reduced-motion: reduce){
+  input[type=checkbox],input[type=checkbox]::after{transition:none}
+}

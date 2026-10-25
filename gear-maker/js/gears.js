@@ -182,6 +182,79 @@ const Gears = GW.Gears = {
     return true;
   },
 
+  /* ------------------------------------------------------------ roles
+     Make a gear the driver (the first gear of its assembly, the one with its own speed). Every link between it and the old driver
+     is turned round: the old parent becomes a child of the gear it used to drive, put exactly where it already stands (the angle
+     around the partner, the offsets and the shaft angle are searched until the pose matches to a thousandth of a millimeter), so
+     nothing in the 3D view moves and every pair keeps meshing. Returns { ok, reason }. Nothing is changed unless every link reverses. */
+  LINKKEYS: ['linkKind', 'meshAngle', 'meshOffset', 'shaftOffset', 'shaftAngle', 'shaftPhase'],
+  makeDriver(id){
+    const s = Gears.get(id); if(!s) return { ok: false, reason: 'That gear is not on the table.' };
+    if(!s.parentId) return { ok: true, unchanged: true };
+    Layout.solveAll();
+    const path = [s]; for(let n = 0; path[path.length - 1].parentId && n < 200; n++) path.push(Gears.get(path[path.length - 1].parentId));
+    const pose = new Map(); Gears.list.forEach(g => pose.set(g.id, { pos: g.rt.pos.clone(), quat: g.rt.quat.clone() }));
+    const keep = new Map(); Gears.list.forEach(g => { const o = { parentId: g.parentId, px: g.px, py: g.py, pz: g.pz, rx: g.rx, ry: g.ry, rz: g.rz, rpm: g.rpm }; Gears.LINKKEYS.forEach(k => { o[k] = g[k]; }); keep.set(g.id, o); });
+    const omega = s.rt.omega || 0, q = s.rt.q;
+    const restore = () => { Gears.list.forEach(g => Object.assign(g, keep.get(g.id))); Gears.dirty = true; Layout.solveAll(); };
+    try {
+      for(let k = path.length - 1; k >= 1; k--){
+        const P = path[k], C = path[k - 1], ok = Gears.reverseLink(P, C, pose);
+        if(!ok) throw new Error(`The link between ${P.name} and ${C.name} cannot be turned round (${P.type} + ${C.type}).`);
+      }
+    } catch(e){ restore(); return { ok: false, reason: e.message }; }
+    // the new driver stands where it stood and keeps the speed it already had
+    const ps = pose.get(s.id), eu = new T.Euler().setFromQuaternion(ps.quat, 'XYZ');
+    s.parentId = null; s.px = +ps.pos.x.toFixed(4); s.py = +ps.pos.y.toFixed(4); s.pz = +ps.pos.z.toFixed(4);
+    s.rx = +U.deg(eu.x).toFixed(4); s.ry = +U.deg(eu.y).toFixed(4); s.rz = +U.deg(eu.z).toFixed(4);
+    s.rpm = +(s.type === 'rack' ? omega : omega * 30 / Math.PI).toFixed(3);
+    Gears.list.forEach(g => { g.rt.osc = null; });
+    Gears.dirty = true; Layout.solveAll(); s.rt.q = q;
+    // every gear must have stayed where it was
+    const off = Gears.list.reduce((m, g) => Math.max(m, g.rt.pos.distanceTo(pose.get(g.id).pos)), 0);
+    if(off > 0.02){ restore(); return { ok: false, reason: 'The assembly would have moved (' + off.toFixed(2) + ' mm), so it was left as it was.' }; }
+    Gears.emit('link', s);
+    return { ok: true };
+  },
+  /* P (the old parent) becomes a child of C. Search the link settings until P is placed where it is now. */
+  reverseLink(P, C, pose){
+    const Cp = pose.get(C.id), Pp = pose.get(P.id);
+    const save = { c: [C.rt.pos.clone(), C.rt.quat.clone()], p: [P.rt.pos.clone(), P.rt.quat.clone()] };
+    const old = {}; Gears.LINKKEYS.forEach(k => { old[k] = C[k]; });
+    const kind = GW.Compat.kindOf(C.type, P.type);
+    if(!kind) return false;
+    const err = () => {
+      let r;
+      try { C.rt.pos.copy(Cp.pos); C.rt.quat.copy(Cp.quat); r = GW.Mount.place(C, P); } catch(e){ return Infinity; }
+      return P.rt.pos.distanceTo(Pp.pos) + 10 * Math.abs(2 * Math.acos(Math.min(1, Math.abs(P.rt.quat.dot(Pp.quat)))));
+    };
+    let best = { e: Infinity };
+    const sA = old.shaftAngle;
+    const offs = [-old.shaftOffset, old.shaftOffset, 0].filter((v, i, a) => a.indexOf(v) === i);
+    const angs = [sA, 180 - sA].filter((v, i, a) => a.indexOf(v) === i);
+    const phs = [-old.shaftPhase, old.shaftPhase].filter((v, i, a) => a.indexOf(v) === i);
+    const mos = [old.meshOffset];
+    P.linkKind = old.linkKind;
+    offs.forEach(so => angs.forEach(sa => phs.forEach(sp => mos.forEach(mo => {
+      P.shaftOffset = so; P.shaftAngle = sa; P.shaftPhase = sp; P.meshOffset = mo;
+      for(let a = -180; a < 180; a += 5){ P.meshAngle = a; const e = err(); if(e < best.e) best = { e, a, so, sa, sp, mo }; }
+    }))));
+    if(!isFinite(best.e)){ P.rt.pos.copy(save.p[0]); P.rt.quat.copy(save.p[1]); return false; }
+    P.shaftOffset = best.so; P.shaftAngle = best.sa; P.shaftPhase = best.sp; P.meshOffset = best.mo;
+    for(const step of [1, 0.2, 0.04, 0.008, 0.0016]){
+      const mid = best.a; for(let a = mid - step * 5; a <= mid + step * 5 + 1e-9; a += step){ P.meshAngle = a; const e = err(); if(e < best.e) best = Object.assign(best, { e, a }); }
+    }
+    P.meshAngle = +best.a.toFixed(4);
+    const fin = err();
+    C.rt.pos.copy(save.c[0]); C.rt.quat.copy(save.c[1]); P.rt.pos.copy(save.p[0]); P.rt.quat.copy(save.p[1]);
+    if(!(fin < 0.01)) return false;
+    // turn the link round: C becomes free (its own world pose is written at the end for the new driver), P hangs off C
+    P.parentId = C.id; P.rt.q = 0;
+    C.parentId = null; const eu = new T.Euler().setFromQuaternion(Cp.quat, 'XYZ');
+    C.px = Cp.pos.x; C.py = Cp.pos.y; C.pz = Cp.pos.z; C.rx = U.deg(eu.x); C.ry = U.deg(eu.y); C.rz = U.deg(eu.z);
+    return true;
+  },
+
   /* turn the new child to the roomiest side of its parent */
   chooseSide(C){
     const P = Gears.get(C.parentId);

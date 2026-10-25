@@ -7,7 +7,8 @@
    saved projects that read back, no leaked memory) and look right (blank 3D view, clipped controls,
    contrast, slow frames). It then says what went right and wrong, with how to reproduce each problem
    and a guess at the cause. Seeded: the same seed gives the same actions.
-   Modes: Quick, Standard and Thorough follow a plan (every control of every gear type, every kind of pair,
+   Modes: Total analysis traces every step of a Quick run without keeping any of it (see Trace below).
+   Quick, Standard and Thorough follow a plan (every control of every gear type, every kind of pair,
    every sample, whole flows, random runs) with a percentage bar and a finishing time;
    "Aim at problems" replays what broke before, shrinks each failure to its shortest recipe and hunts around it;
    "Free run" goes on until you stop it.
@@ -37,7 +38,7 @@ const find = (kind, sev, title, detail, extra) => {
   return f;
 };
 const ok = name => T.passed.set(name, (T.passed.get(name) || 0) + 1);
-const act = (name, args) => { T.n++; T.log.push(`#${T.n} ${name}${args ? ' ' + args : ''}`); if (T.log.length > 200) T.log.shift(); };
+const act = (name, args) => { if (window.__gwTrace && window.__gwTrace.on) window.__gwTrace.emit(0, '■ action #' + (T.n + 1) + ' ' + name + (args ? ' ' + args : '')); T.n++; T.log.push(`#${T.n} ${name}${args ? ' ' + args : ''}`); if (T.log.length > 200) T.log.shift(); };
 
 /* guesses at the cause, from what kind of check failed */
 const GUESS = [
@@ -772,12 +773,116 @@ const PHASES = {
   }
 };
 
+/* ----------------------------------------------------------------- "Total analysis": a trace of every step
+   Every function of the app's own modules is wrapped for the length of a run; each call and return becomes one line
+   ("→ Gears.set(#3 Driver, "z", 24)" ... "← Gears.set = [] 0.31ms"). The lines are NOT kept: they are shown one at a time in a
+   live ticker and, if a file was chosen, streamed straight to it in blocks (when the disk falls behind, lines are counted as
+   dropped instead of piling up). All that is held is a few dozen numbers: the counters. The wrappers are taken off again when the
+   run ends. Per-frame work (drawing, the layout step, label and tool updates) and the pure number-crunching helpers (Geo, Prof, U)
+   are only counted, otherwise one second of the animation alone would be hundreds of thousands of lines. */
+const Trace = {
+  on: false, depth: 0, maxDepth: 0, lines: 0, dropped: 0, counted: 0, errors: 0, by: Object.create(null), last: '', t0: 0, restore: [],
+  writer: null, buf: '', bufLines: 0, pend: 0, fileName: '', raf: 0, tiny: false,
+  NS: ['Gears', 'UI', 'Build', 'Mount', 'Layout', 'Compat', 'Scene', 'History', 'Export', 'Blueprint', 'Tools', 'Xform', 'Spot', 'Wizard', 'Calc', 'Tol', 'Collide', 'Drives', 'Labels', 'Tex', 'Preview', 'Anim', 'Presets', 'Geo', 'Prof', 'U'],
+  COUNT_ONLY_NS: new Set(['Geo', 'Prof', 'U', 'Anim']),
+  FRAME: new Set(['Layout.update', 'Layout.apply', 'Scene.render', 'Scene.updateCam', 'Scene.smooth', 'Scene.changed', 'Scene.measure', 'Scene.insetBottom', 'Scene.insetTop', 'Scene.insetRight', 'Scene.size', 'Scene.wake', 'Scene.hover', 'Scene.setHover', 'Scene.followInset',
+    'Labels.update', 'Spot.sync', 'Tools.sync', 'Tools.drawTriad', 'Tools.hover', 'Xform.sync', 'Blueprint.tick', 'UI.tick', 'UI.mark', 'UI.process', 'UI.statusOf', 'UI.wantsReal', 'Drives.update', 'Drives.sync', 'Mount.follow', 'Mount.frame', 'Mount.angleIn']),
+  TINY: new Set(['Gears.get', 'Gears.children', 'Gears.descendants', 'Gears.rootOf', 'Gears.reach', 'Gears.canLink', 'Calc.pitchR', 'Calc.radii', 'Calc.outerReach', 'Calc.isRack', 'Calc.helixOf', 'Tol.of', 'Tol.allowance', 'Tol.apply', 'Tol.hasTeeth', 'Blueprint.rel', 'Blueprint.dir', 'Blueprint.axis', 'Blueprint.Ls', 'Blueprint.L2', 'Blueprint.Lh', 'Blueprint.Lt', 'UI.sel', 'Compat.kindOf']),
+  fmt(v, d){
+    if (v == null) return String(v);
+    const t = typeof v;
+    if (t === 'number') return Number.isInteger(v) ? String(v) : v.toFixed(3).replace(/0+$/, '').replace(/\.$/, '');
+    if (t === 'string') return JSON.stringify(v.length > 22 ? v.slice(0, 20) + '…' : v);
+    if (t === 'boolean') return String(v);
+    if (t === 'function') return 'fn';
+    if (v.then) return 'Promise';
+    if (Array.isArray(v)) return d > 0 ? '[' + v.length + ']' : '[' + v.slice(0, 3).map(x => Trace.fmt(x, 1)).join(',') + (v.length > 3 ? ',…' + v.length : '') + ']';
+    if (v.isVector3) return `(${Trace.fmt(v.x)},${Trace.fmt(v.y)},${Trace.fmt(v.z)})`;
+    if (v.isObject3D || v.isBufferGeometry || v.isMaterial) return v.type || 'three';
+    if (v.id != null && v.type && v.name != null) return '#' + v.id + ' ' + v.name;
+    if (v.nodeType) return '<' + (v.tagName || v.nodeName).toLowerCase() + (v.id ? '#' + v.id : '') + '>';
+    if (v instanceof Event) return v.type;
+    const k = Object.keys(v); return d > 0 ? '{…}' : '{' + k.slice(0, 4).join(',') + (k.length > 4 ? ',…' : '') + '}';
+  },
+  args(a){ let s = ''; for (let i = 0; i < a.length && s.length < 90; i++) s += (i ? ', ' : '') + Trace.fmt(a[i], 0); return s.length > 96 ? s.slice(0, 94) + '…' : s; },
+  emit(depth, text){
+    Trace.lines++;
+    const line = (' '.repeat(Math.min(depth, 24))) + text;
+    Trace.last = line;
+    if (Trace.writer){
+      Trace.buf += '+' + ((performance.now() - Trace.t0) | 0) + ' ' + line + '\n'; Trace.bufLines++;
+      if (Trace.buf.length > 32768) Trace.flush();
+    }
+  },
+  flush(){
+    if (!Trace.writer || !Trace.buf) return;
+    if (Trace.pend >= 2){ Trace.dropped += Trace.bufLines; Trace.buf = ''; Trace.bufLines = 0; return; }       // the disk is behind: drop, never queue
+    const b = Trace.buf; Trace.buf = ''; Trace.bufLines = 0; Trace.pend++;
+    Trace.writer.write(b).then(() => { Trace.pend--; }, () => { Trace.pend--; });
+  },
+  wrap(ns, obj, onlyOwn){
+    Object.keys(obj).forEach(key => {
+      const d = Object.getOwnPropertyDescriptor(obj, key);
+      if (!d || !d.writable || typeof d.value !== 'function' || /^[A-Z]/.test(key) || d.value.__traced) return;
+      const orig = d.value, full = ns + '.' + key;
+      const kind = Trace.COUNT_ONLY_NS.has(ns) || Trace.FRAME.has(full) ? 1 : Trace.TINY.has(full) ? 2 : 0;
+      const w = function (...a) {
+        if (!Trace.on) return orig.apply(this, a);
+        Trace.by[ns] = (Trace.by[ns] | 0) + 1;
+        if (kind === 1){ Trace.counted++; return orig.apply(this, a); }
+        const quiet = kind === 2 && !Trace.tiny, dp = Trace.depth++;
+        if (dp > Trace.maxDepth) Trace.maxDepth = dp;
+        const t = performance.now();
+        if (!quiet) Trace.emit(dp, '→ ' + full + '(' + Trace.args(a) + ')');
+        let r;
+        try { r = orig.apply(this, a); }
+        catch (e) { Trace.depth = dp; Trace.errors++; Trace.emit(dp, '✘ ' + full + ' threw ' + (e && e.message)); throw e; }
+        Trace.depth = dp;
+        if (!quiet) Trace.emit(dp, '← ' + full + ' = ' + Trace.fmt(r, 0) + '  ' + (performance.now() - t).toFixed(2) + 'ms');
+        return r;
+      };
+      w.__traced = true; w.__orig = orig;
+      try { obj[key] = w; Trace.restore.push([obj, key, orig]); } catch (e) {}
+    });
+  },
+  async pickFile(){
+    Trace.writer = null; Trace.fileName = '';
+    if (!window.showSaveFilePicker) return false;
+    try {
+      const h = await window.showSaveFilePicker({ suggestedName: 'gear-maker-trace.txt', types: [{ description: 'Text', accept: { 'text/plain': ['.txt'] } }] });
+      Trace.writer = await h.createWritable(); Trace.fileName = h.name; return true;
+    } catch (e) { return false; }
+  },
+  start(){
+    Object.assign(Trace, { on: true, depth: 0, maxDepth: 0, lines: 0, dropped: 0, counted: 0, errors: 0, by: Object.create(null), last: '', t0: performance.now(), buf: '', bufLines: 0, pend: 0 });
+    Trace.tiny = !!(document.getElementById('dtTiny') && document.getElementById('dtTiny').checked);
+    Trace.NS.forEach(ns => { const o = ns === 'Presets' ? null : GW[ns]; if (o && typeof o === 'object') Trace.wrap(ns, o); });
+    Trace.wrap('Presets', { meshAuto: GW.meshAuto }); GW.Presets.forEach(p => { if (p.build) Trace.wrap('Presets.' + p.id, p); });
+    // the tester's own actions are steps too
+    const tick = () => { if (!Trace.on) return; const el = document.getElementById('dtTrace'); if (el && el.textContent !== Trace.last) el.textContent = Trace.last; const c = document.getElementById('dtTraceN'); if (c) c.textContent = Trace.lines.toLocaleString() + ' lines · ' + Trace.counted.toLocaleString() + ' per-frame / math calls counted · depth ' + Trace.maxDepth + (Trace.dropped ? ' · ' + Trace.dropped.toLocaleString() + ' dropped (disk behind)' : ''); Trace.raf = requestAnimationFrame(tick); };
+    Trace.raf = requestAnimationFrame(tick);
+  },
+  async stop(){
+    if (!Trace.on) return;
+    Trace.on = false; cancelAnimationFrame(Trace.raf);
+    Trace.restore.forEach(([o, k, f]) => { try { o[k] = f; } catch (e) {} }); Trace.restore.length = 0;
+    Trace.flush();
+    if (Trace.writer){ try { await Trace.writer.close(); } catch (e) {} Trace.writer = null; }
+    const el = document.getElementById('dtTrace'); if (el) el.textContent = 'Finished. ' + Trace.lines.toLocaleString() + ' lines were traced and none were kept' + (Trace.fileName ? '; they were streamed to ' + Trace.fileName : '') + '.';
+  },
+  summary(){
+    const top = Object.keys(Trace.by).sort((a, b) => Trace.by[b] - Trace.by[a]).slice(0, 12).map(k => `${k} ${Trace.by[k].toLocaleString()}`).join(' · ');
+    return `Total analysis: ${Trace.lines.toLocaleString()} lines traced (none kept in memory), ${Trace.counted.toLocaleString()} per-frame / math calls only counted, deepest call chain ${Trace.maxDepth}, ${Trace.errors} thrown errors, ${Trace.dropped.toLocaleString()} lines dropped while the disk was behind.${Trace.fileName ? ' File: ' + Trace.fileName + '.' : ' No file was chosen: lines were only shown live.'}\nCalls by module: ${top}`;
+  }
+};
+
 const PLANS = {
   quick:    { total: 70,   run: async () => { await PHASES.samples(false); await PHASES.controls(['spur', 'helical', 'bevel', 'worm', 'sprocket', 'elliptical'], 5, false); await PHASES.pairs(8); await PHASES.random(60); await PHASES.flows(); } },
   standard: { total: 400,  run: async () => { await PHASES.samples(false); await PHASES.controls(typeKeys, 10, false); await PHASES.pairs(0); await PHASES.random(300); await PHASES.flows(); } },
   thorough: { total: 2400, run: async () => { await PHASES.samples(true); await PHASES.controls(typeKeys, 0, true); await PHASES.pairs(0); await PHASES.random(1600); await PHASES.flows(); await PHASES.pairs(0); await PHASES.random(300); } },
   free:     { total: 0,    run: async () => { await PHASES.flows(); while (!T.stop) await PHASES.random(200); } },
-  problems: { total: 0,    run: null }
+  problems: { total: 0,    run: null },
+  total:    { total: 70,   run: async () => { await PLANS.quick.run(); } }
 };
 
 /* ----------------------------------------------------------------- "aim at problems": replay, shrink, hunt */
@@ -817,6 +922,7 @@ async function run(mode, seed){
   T.rng = rngFrom(T.seed);
   const snapshot = JSON.parse(GW.History.snap()), selBefore = UI.selId, quality = GW.Build.quality, spin = G().spin;
   hook(); UI.closeModal(); if (GW.Guide && GW.Guide.active) GW.Guide.stop(true);
+  if (mode === 'total'){ window.__gwTrace = Trace; Trace.start(); }
   render();
   try {
     await freshTable();
@@ -824,6 +930,7 @@ async function run(mode, seed){
   } catch (e) { find('error', 'error', 'The tester itself stopped: ' + e.message, (e.stack || '').split('\n').slice(0, 3).join(' | ')); }
   finally {
     if (!T.stop) { T.planDone = T.planTotal || T.planDone; }
+    if (mode === 'total'){ await Trace.stop(); T.note = Trace.summary(); }
     remember(); unhook(); T.running = false; GW.Build.quality = quality; $('#qualSel').value = quality; UI.setPlaying(spin);
     // put the table back as it was
     G().clear({ instant: true }); UI.selId = null; try { G().fromJSON(snapshot); } catch (e) {} settle(); if (selBefore != null && G().get(selBefore)) UI.select(selBefore); GW.Scene.fit(true); settle();
@@ -857,7 +964,8 @@ const CSS = `
 #gwdev .f pre{margin:5px 0 0;font:11px/1.4 ui-monospace,Consolas,monospace;color:#b9bdc4;white-space:pre-wrap;word-break:break-word;user-select:text}
 #gwdev .f .g{color:#e8c547;font-size:11.5px;margin-top:4px}
 #gwdev .good{display:flex;flex-wrap:wrap;gap:5px}#gwdev .good span{background:#15271c;border:1px solid #234a30;color:#7fd7a1;border-radius:999px;padding:2px 9px;font-size:11px}
-#gwdev .note{color:#e8c547;font-size:11.5px;margin:6px 0}
+#gwdev .tr{margin:4px 0 8px;padding:6px 8px;background:#0b0c0e;border:1px solid #222428;border-radius:7px;font:11px/1.35 ui-monospace,Consolas,monospace;color:#8fb3ff;white-space:pre;overflow:hidden;text-overflow:ellipsis;min-height:1.6em}
+#gwdev .note{color:#e8c547;white-space:pre-wrap;font-size:11.5px;margin:6px 0}
 `;
 let panel;
 function build(){
@@ -866,9 +974,11 @@ function build(){
   panel = document.createElement('div'); panel.id = 'gwdev'; panel.hidden = true;
   panel.innerHTML = `<div class="dh"><b>Gear Maker tester</b><span>press \` to close</span><i><button data-a="min" title="Fold">–</button><button data-a="close" title="Close">✕</button></i></div>
   <div class="bd">
-    <div class="row"><label>Mode</label><select id="dtMode"><option value="quick">Quick (~1 min)</option><option value="standard">Standard</option><option value="thorough">Thorough</option><option value="problems">Aim at problems</option><option value="free">Free run</option></select>
+    <div class="row"><label>Mode</label><select id="dtMode"><option value="quick">Quick (~1 min)</option><option value="standard">Standard</option><option value="thorough">Thorough</option><option value="problems">Aim at problems</option><option value="total">Total analysis (trace every step)</option><option value="free">Free run</option></select>
       <label>Seed</label><input type="text" id="dtSeed" size="7" value="1"></div>
     <div class="row"><button class="go" data-a="start">Start</button><button class="stop" data-a="stop" disabled>Stop</button><button data-a="copy">Copy report</button><button data-a="clear" title="Forget the saved failures that Aim at problems replays">Forget saved</button></div>
+    <div class="row" id="dtTraceRow" hidden><label><input type="checkbox" id="dtFile" checked> stream every line to a file on disk (uses no memory)</label><label><input type="checkbox" id="dtTiny"> include tiny helpers (get, reach…)</label></div>
+    <div id="dtTraceBox" hidden><div class="meta"><span id="dtTraceN">Nothing is stored: each step is shown here for a moment.</span></div><pre id="dtTrace" class="tr"></pre></div>
     <div class="bar"><div id="dtBar"></div></div><div class="meta"><span id="dtPct">Ready</span><span id="dtEta"></span></div>
     <div id="dtOut"></div>
   </div>`;
@@ -881,12 +991,13 @@ function build(){
   panel.addEventListener('click', e => {
     const b = e.target.closest('button[data-a]'); if (!b) return; const a = b.dataset.a;
     if (a === 'close') toggle(false); else if (a === 'min') $('.bd', panel).hidden = !$('.bd', panel).hidden;
-    else if (a === 'start') run($('#dtMode').value, parseInt($('#dtSeed').value, 10) || 1);
+    else if (a === 'start'){ const mode = $('#dtMode').value; (async () => { if (mode === 'total'){ Trace.fileName = ''; if ($('#dtFile').checked) await Trace.pickFile(); $('#dtTraceBox').hidden = false; } run(mode, parseInt($('#dtSeed').value, 10) || 1); })(); }
     else if (a === 'stop') T.stop = true;
     else if (a === 'copy') copy();
     else if (a === 'clear'){ try { localStorage.removeItem(SAVE); } catch (e) {} render(); }
   });
   panel.addEventListener('keydown', e => e.stopPropagation());
+  $('#dtMode').addEventListener('change', () => { $('#dtTraceRow').hidden = $('#dtMode').value !== 'total'; if ($('#dtMode').value !== 'total') $('#dtTraceBox').hidden = true; });
 }
 const esc = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 function report(){
@@ -921,5 +1032,5 @@ function render(){
 setInterval(() => { if (T.running) render(); }, 400);
 
 function toggle(open){ build(); panel.hidden = open == null ? !panel.hidden : !open; if (!panel.hidden) render(); }
-window.GWDev = { toggle, run, report, state: T, Check, Act, PHASES, PLANS, find };
+window.GWDev = { toggle, run, report, state: T, Check, Act, PHASES, PLANS, find, Trace };
 })();

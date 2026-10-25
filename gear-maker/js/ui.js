@@ -467,6 +467,8 @@ const UI = GW.UI = {
       const fill = () => r.style.setProperty('--fill', U.clamp((r.value - r.min) / (r.max - r.min), 0, 1) * 100 + '%');
       r.oninput = () => { n.value = fmtD(+r.value); showAlt(+r.value); fill(); apply(+r.value, true); };
       r.addEventListener('pointerdown', () => UI.beginDrag());
+      r.setAttribute('data-tip', 'Double-click to reset\nPuts this setting back to where a new ' + TYPES[g.type].short.toLowerCase() + ' starts.');
+      r.addEventListener('dblclick', () => { const d0 = Types.defaults(g.type)[key]; if(d0 == null || typeof d0 !== 'number') return; apply(d0, false); UI.flush(); UI.syncProps(); });
       r.addEventListener('change', () => { UI.flush(); UI.endDrag(); });
       n.oninput = () => { if(n.value === '' || isNaN(+n.value)) return; const mm = fromD(+n.value); r.value = mm; showAlt(mm); fill(); apply(mm, false); };
       n.onchange = () => { UI.flush(); UI.syncProps(); };
@@ -600,6 +602,27 @@ const UI = GW.UI = {
     const P = g.parentId ? G().get(g.parentId) : null;
     const st = UI.statusOf(g);
     c.grp.querySelector('.gc').textContent = P ? (st && st.ok ? '● meshed' : '● needs work') : 'free';
+    // role: which gear drives which. Picking "Driven by X" (or "Driver") makes that gear the driver of the assembly, nothing moves.
+    const nbs = (P ? [P] : []).concat(G().children(g.id));
+    if(nbs.length){
+      const rr = make('div', 'pr wide1 role'); rr.appendChild(make('label', null, 'Role'));
+      const sr = make('select'); sr.setAttribute('aria-label', 'Role of this gear in the assembly');
+      const opt = (v, l) => { const o = make('option', null, l); o.value = v; sr.appendChild(o); };
+      if(P){ opt('now', (g.linkKind === 'same shaft' ? 'Turned by ' : 'Driven by ') + P.name); opt('driver', 'Driver (input)'); }
+      else opt('now', 'Driver (input)');
+      nbs.forEach(n => { if(n === P) return; opt(n.id, (n.linkKind === 'same shaft' ? 'Turned by ' : 'Driven by ') + n.name); });
+      sr.value = 'now';
+      sr.onchange = () => {
+        const v = sr.value; if(v === 'now') return;
+        const target = v === 'driver' ? g.id : +v;
+        GW.History.commit();
+        const r = G().makeDriver(target);
+        if(!r.ok){ UI.toast(r.reason, 5000, 'bad'); sr.value = 'now'; return; }
+        UI._sv++; c.sig = null; UI.mark({ list: 1, fb: 1, props: 1, helpers: 1 }); GW.History.commit();
+        UI.toast((G().get(target).name) + ' is now the driver. Nothing moved; undo (Ctrl+Z) puts it back.', 3600);
+      };
+      rr.appendChild(sr); host.appendChild(rr);
+    }
     if(P){
       const line = make('div', 'hint');
       line.innerHTML = `${g.linkKind === 'same shaft' ? 'Keyed to the shaft of' : 'Meshed with'} <b style="color:#fff">${esc(P.name)}</b>. ${st && !st.ok ? '<span style="color:var(--bad)">The teeth do not fit yet — see the strip below.</span>' : ''}`;
@@ -1050,7 +1073,7 @@ const UI = GW.UI = {
   openAdd(){
     const groups = {};
     Object.keys(TYPES).forEach(t => { (groups[TYPES[t].group] = groups[TYPES[t].group] || []).push(t); });
-    let html = `<div class="mhead"><h3>Add a gear</h3><button class="iconbtn" id="mClose" aria-label="Close">${ICON.x}</button></div><div class="mbody">`, i = 0;
+    let html = `<div class="mhead"><h3>Add a gear</h3><button class="iconbtn" id="mClose" aria-label="Close">${ICON.x}</button></div><div class="mbody"><h4>Build a whole assembly</h4><div class="cards"><button class="card" id="wzCard" type="button"><canvas class="cth" width="264" height="184" aria-hidden="true"></canvas><b>Gear wizards…</b><span>Planetary gearbox, reduction train, rack and pinion, worm drive, bevel pair, chain or belt drive. Each asks plain questions and recommends sizes that mesh.</span></button></div>`, i = 0;
     Object.keys(groups).forEach(gr => {
       html += `<h4>${gr}</h4><div class="cards">`;
       groups[gr].forEach(t => { html += `<button class="card" data-t="${t}" style="animation-delay:${i++ * 25}ms"><canvas class="cth" width="264" height="184" aria-hidden="true"></canvas><b>${TYPES[t].label}</b><span>${TYPES[t].desc}</span></button>`; });
@@ -1058,12 +1081,14 @@ const UI = GW.UI = {
     });
     UI.openModal(html + '</div>');
     $('mClose').onclick = UI.closeModal;
-    document.querySelectorAll('#modal .card').forEach(c => {
+    const wz = $('wzCard');
+    if(wz){ GW.Preview.thumb(wz.querySelector('canvas'), { sample: GW.Presets.find(p => p.id === 'planetary') }); wz.onclick = () => { GW.Preview.hide(); GW.Wizard.open(); }; }
+    document.querySelectorAll('#modal .card[data-t]').forEach(c => {
       GW.Preview.thumb(c.querySelector('canvas'), { type: c.dataset.t });
       const on = () => GW.Preview.show({ type: c.dataset.t, anchor: c, side: 'right' }), off = () => GW.Preview.hide();
       c.addEventListener('pointerenter', on); c.addEventListener('pointerleave', off); c.addEventListener('focus', on); c.addEventListener('blur', off);
     });
-    document.querySelectorAll('#modal .card').forEach(c => c.onclick = () => {
+    document.querySelectorAll('#modal .card[data-t]').forEach(c => c.onclick = () => {
       GW.Preview.hide(); UI.closeModal();
       const g = G().add(c.dataset.t);
       GW.Scene.fit(false, G().list);

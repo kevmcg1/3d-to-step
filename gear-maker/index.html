@@ -6,8 +6,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>Gear Maker — 3D Gear Designer</title>
 <meta name="description" content="Design 16 kinds of engineering gear in 3D, check whether they mesh, and export STL, OBJ or STEP." />
-<link rel="preload" href="../fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
+<link rel="preload" href="../fonts/inter-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin />
+<link rel="stylesheet" href="../fonts/fonts.css" />
 <link rel="stylesheet" href="css/app.css?v=1" />
+<link rel="stylesheet" href="css/checkbox.css?v=1" />
 </head>
 <body>
 <header class="site-head" role="banner"><a href="https://kevmcg1.github.io/portfolio" target="_top" aria-label="Back to the portfolio at kevmcg1.github.io">KEVMCG1.GITHUB.IO</a></header>
@@ -39,6 +41,8 @@
         <span class="logo-stack" aria-hidden="true"><span class="logo-top">Gear</span><span class="logo-bot">Maker</span></span>
         <span class="logo-brk" aria-hidden="true">]</span>
       </h1>
+      <div class="rel-badge alpha" role="note">Alpha testing</div>
+      <div class="vrow"><button type="button" class="vchip" id="verChip">What’s new</button></div>
       <div class="logo-rule" aria-hidden="true"></div>
       <div class="logo-foot"><span class="logo-range">16 types · STL · OBJ · STEP</span></div>
       <button type="button" class="guide-btn" id="guideBtn" data-tip="How do I use it?&#10;A short guided tour: load a sample, change a gear, read the feedback, export.">
@@ -48,6 +52,7 @@
 
     <section id="secSamples">
       <h2>Samples <i class="count" id="sampleCount">0</i></h2>
+      <button type="button" class="wide wz-open" id="wzOpen"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="5" r="2"/><circle cx="18.5" cy="15.5" r="2"/><circle cx="5.5" cy="15.5" r="2"/><circle cx="12" cy="12" r="9"/></svg><span>Gear wizards: make a gear set</span></button>
       <p class="note" id="sampleNote">Click a sample to load it. It replaces what is on the table; the + button adds it beside.</p>
       <div class="slist" id="sampleList" role="list"></div>
     </section>
@@ -88,6 +93,8 @@
       <button class="ib" id="playBtn" aria-pressed="true" data-tip="Spin&#10;Pause or resume the gears (Space)."><svg viewBox="0 0 24 24" class="ic-on"><path d="M8 5v14M16 5v14"/></svg><svg viewBox="0 0 24 24" class="ic-off"><path d="M8 5l11 7-11 7z"/></svg></button>
       <label class="vp-sl" data-tip="Speed&#10;How fast the gears turn."><input type="range" id="speedR" min="0" max="4" step="0.05" value="1" aria-label="Speed"><b id="speedV">1.00×</b></label>
       <button class="ib" id="labelBtn" aria-pressed="true" data-tip="Gear labels&#10;Show which gear is the driver and which is driven."><svg viewBox="0 0 24 24"><path d="M4 7h16v10H4zM8 12h8"/></svg></button>
+      <button class="ib" id="measureBtn" aria-pressed="false" data-tip="Measure&#10;Click two points in the 3D view for the distance and the X, Y and Z gap (M)."><svg viewBox="0 0 24 24"><path d="M3 17 17 3l4 4L7 21zM8 12l2 2M11 9l2 2M14 6l2 2"/></svg></button>
+      <button class="ib" id="originBtn" aria-pressed="false" data-tip="Set origin&#10;Click a point to measure everything from. X left to right, Y forward to back, Z up and down (O)."><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v5M12 17v5M2 12h5M17 12h5"/></svg></button>
       <button class="ib" id="helpBtn" aria-pressed="true" data-tip="Pitch circle &amp; axis&#10;Guide lines on the selected gear."><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 2v20" stroke-dasharray="2 3"/></svg></button>
       <select id="qualSel" class="vp-sel" aria-label="Mesh quality" data-tip="Mesh quality&#10;Fine gives the smoothest export."><option value="0">Draft</option><option value="1" selected>Normal</option><option value="2">Fine</option></select>
     </div>
@@ -141,6 +148,9 @@
 <script defer src="js/xform.js?v=1"></script>
 <script defer src="js/spot.js?v=1"></script>
 <script defer src="js/blueprint.js?v=1"></script>
+<script defer src="js/tools.js?v=1"></script>
+<script defer src="js/wizard.js?v=1"></script>
+<script defer src="js/wizard2.js?v=1"></script>
 <script defer src="js/drives.js?v=1"></script>
 <script defer src="js/brep.js?v=1"></script>
 <script defer src="js/exporters.js?v=1"></script>
@@ -148,6 +158,10 @@
 <script defer src="js/ui.js?v=1"></script>
 <script defer src="js/preview.js?v=1"></script>
 <script defer src="js/guide.js?v=1"></script>
+<script defer src="js/dropdowns.js?v=1"></script>
+<script defer src="js/bubbles.js?v=1"></script>
+<script defer src="js/version.js?v=1"></script>
+<script defer src="js/changelog.js?v=1"></script>
 <script defer src="js/app.js?v=1"></script>
 </body>
 </html>

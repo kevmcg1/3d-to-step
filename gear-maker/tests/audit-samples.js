@@ -43,3 +43,4 @@ GW.Presets.forEach(p => {
   console.log((out.length ? '✘ ' : '✔ ') + p.id.padEnd(14) + p.name + (out.length ? '\n    ' + out.join('\n    ') : '')); bad += out.length ? 1 : 0;
 });
 console.log(bad ? `\n${bad} sample(s) with problems` : '\nall samples clean');
+process.exit(bad ? 1 : 0);

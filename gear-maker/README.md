@@ -30,6 +30,17 @@ Modeled on the Shop Tool Sim:
 - **Bottom strip**: whether the selected gear meshes, exactly what it needs, and its speed, ratio, center distance and contact ratio.
 - **Phones and small laptops**: the sidebars become drawers, the toolbar shrinks, and the bottom strip starts folded on a phone. A rack and pinion moves back and forth within the rack's length.
 
+## New in 0.4.0
+
+- **Blueprint** (`B`): exact dimensions, placement and spacing measured from an origin you choose (world zero, a typed point, or a gear's center or face, optionally in that gear's axes). A layout plan (top / front / side), a placement table, a spacing table (center to center, between shafts, air gap along the shaft) and one dimensioned drawing per gear, all redrawn on every change. Download the sheets as SVG, the numbers as CSV, or print.
+- **Move / Rotate / Scale** (`W` `E` `R`): click a gear and a bar offers the three tools. A meshed gear moves, turns or scales its whole assembly; scale multiplies every size together so what fitted still fits.
+- **Measure** (`M`) and **Set origin** (`O`): click two points for the distance and the X, Y and Z gap; click one point to make it the origin. X runs left to right, Y forward to back, Z up and down (a small triad in the corner shows them for the current view).
+- **Which gear is this?** (`H`): dims the view, outlines the gear, fades the others to 90 % transparent and ends by itself after 3 seconds.
+- **Roles**: the Role setting of a gear in the Connection group makes any gear the driver; nothing moves and every pair keeps meshing.
+- **Gear wizards**: planetary gearbox, reduction train (single or compound), rack and pinion, worm drive, bevel pair, chain or belt drive. Each asks plain questions, recommends sizes that really mesh, and says which gear to adjust when the numbers do not fit.
+- Turning previews on every sample row and Add card, a search bar for settings, arrows step by .001 in, sliders reset on double-click, animated dropdowns and round checkboxes like the Shop Tool Sim, eased orbit / pan / zoom, and a full 60 frames a second.
+- Dev tool (`` ` ``): **Total analysis** traces every step of a run to a live ticker and an optional file on disk without keeping any of it in memory.
+
 ## Also in the box
 
 - **Inches first.** Every length is shown in inches with the metric value in parentheses (`1.772 in (45 mm)`), in the boxes, the feedback strip, messages and exports info. The **IN / MM** button in the toolbar flips it, and typing works in whichever unit is showing. Everything inside stays in millimeters.
@@ -71,8 +82,12 @@ STEP files are true boundary representations: flat regions (caps, straight tooth
 ## Tests
 
 ```
-npm test            # geometry, compatibility, presets, exports
-node tests/fuzz.js  # thousands of random settings, every gear type
+npm test                     # geometry, compatibility, presets, exports, then the four below
+node tests/fuzz.js           # thousands of random settings, every gear type
+node tests/audit-samples.js  # every sample pair by pair: links, implied meshes, real shapes turning
+node tests/roles.js          # every gear of every sample made the driver in turn: nothing moves, everything still fits
+node tests/wizard.js         # the planetary wizard's rules, and builds of what it recommends
+node tests/wizards.js        # every wizard: defaults work, every offered fix works, what it builds meshes
 ```
 
 Checks that every gear type (and many setting combinations) builds a closed mesh, the compatibility rules, that every preset meshes without overlapping while turning, and the export formats.

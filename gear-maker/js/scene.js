@@ -277,11 +277,12 @@ GW.Scene = {
     const hits = ray.intersectObjects(S.root.children.filter(m => m.visible), false);
     return hits.length ? hits[0].object.userData.id : null;
   },
-  pick(x, y){ const id = GW.Scene.hit(x, y); if(GW.UI) GW.UI.select(id); },
+  pick(x, y){ if(GW.Tools && GW.Tools.mode){ GW.Tools.click(x, y); return; } const id = GW.Scene.hit(x, y); if(GW.UI) GW.UI.select(id); },
   _hoverT: 0,
   hover(x, y){
     const S = GW.Scene, now = performance.now();
     if(now - S._hoverT < 60) return; S._hoverT = now;       // keep the ray test cheap
+    if(GW.Tools && GW.Tools.mode){ GW.Tools.hover(x, y); return; }
     S.setHover(S.hit(x, y));
   },
   setHover(id){
@@ -324,7 +325,7 @@ GW.Scene = {
   changed(spinning){
     const S = GW.Scene, o = S.orbit, G = GW.Gears;
     const r = v => Math.round(v * 200);                                    // ignore changes too small to see
-    const sig = [r(o.theta), r(o.phi), r(o.dist), r(o.target.x), r(o.target.y), r(o.target.z), Math.round(S._inset || 0), S.size().w, S.size().h, G.version, GW.UI.selId, S.hoverId, GW.Xform ? GW.Xform.mode : '', GW.Spot ? Math.round(GW.Spot.k * 100) : 0, S.gridOn, GW.UI._sv, r(S.grid.material.opacity), GW.Anim.list.length].join('|');
+    const sig = [r(o.theta), r(o.phi), r(o.dist), r(o.target.x), r(o.target.y), r(o.target.z), Math.round(S._inset || 0), S.size().w, S.size().h, G.version, GW.UI.selId, S.hoverId, GW.Xform ? GW.Xform.mode : '', GW.Spot ? Math.round(GW.Spot.k * 100) : 0, GW.Tools ? GW.Tools.ver : 0, S.gridOn, GW.UI._sv, r(S.grid.material.opacity), GW.Anim.list.length].join('|');
     const diff = sig !== S._sig; S._sig = sig;
     if(diff) S._wake = Math.max(S._wake || 0, 30);                        // highlight fades and the like need a few more frames
     S._moved = diff || S._wake > 0;                                     // the picture itself changed (not just a turning gear)
