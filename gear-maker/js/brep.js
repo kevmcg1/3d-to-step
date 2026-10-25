@@ -1,8 +1,8 @@
 "use strict";
-/* Gearworks — turns a triangle mesh into a boundary representation that CAD kernels accept.
+/* Gear Maker — turns a triangle mesh into a boundary representation that CAD kernels accept.
    1. weld the corners into shared vertices
    2. split the mesh into closed shells (a gear with a hub is a few overlapping solids)
-   3. merge neighbouring coplanar triangles into single polygon faces (with holes)
+   3. merge neighboring coplanar triangles into single polygon faces (with holes)
    The STEP writer then emits one planar ADVANCED_FACE per polygon. */
 (function(){
 
@@ -71,7 +71,7 @@ GW.Brep = {
       const dot = N[s*3]*N[t*3] + N[s*3+1]*N[t*3+1] + N[s*3+2]*N[t*3+2];
       if(dot > 1 - 1e-10 && Math.abs(planeOff[s] - planeOff[t]) < 3e-4) union(s, t);
     });
-    // a sliver takes the face of the neighbour it shares an edge with
+    // a sliver takes the face of the neighbor it shares an edge with
     const done = new Uint8Array(nT);
     slivers.forEach(([s, t]) => { if(!done[s] && area[t] >= D){ done[s] = 1; union(s, t); } });
 

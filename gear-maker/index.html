@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="robots" content="noai, noimageai" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Gearworks — 3D Gear Lab</title>
+<title>Gear Maker — 3D Gear Designer</title>
 <meta name="description" content="Design 16 kinds of engineering gear in 3D, check whether they mesh, and export STL, OBJ or STEP." />
 <link rel="preload" href="fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
 <link rel="stylesheet" href="css/app.css?v=1" />
@@ -14,7 +14,7 @@
 
 <header class="bar">
   <button class="ib drawer-btn" id="openLeft" aria-label="Open the left sidebar" data-tip="Samples &amp; gears"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
-  <div class="brand" aria-hidden="true"><i>[</i> GEARWORKS <i>]</i></div>
+  <div class="brand" aria-hidden="true"><i>[</i> GEAR MAKER <i>]</i></div>
   <div class="bar-right">
     <button class="pill" id="addBtn" data-tip="Add a gear&#10;Pick from 16 types."><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>Add gear</span></button>
     <a class="pill" href="../" data-tip="3D file to STEP&#10;Convert an STL, OBJ, PLY, 3MF or GLB mesh to STEP."><svg viewBox="0 0 24 24"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9zM12 12l8-4.5M12 12v9M12 12 4 7.5"/></svg><span>STEP converter</span></a>
@@ -33,9 +33,9 @@
   <!-- ============ left sidebar: how to, samples, the table, view, project ============ -->
   <aside class="side left" id="left" aria-label="Samples and gears">
     <header class="logo">
-      <h1 class="logo-mark" aria-label="Gearworks">
+      <h1 class="logo-mark" aria-label="Gear Maker">
         <span class="logo-brk" aria-hidden="true">[</span>
-        <span class="logo-stack" aria-hidden="true"><span class="logo-top">Gear</span><span class="logo-bot">Works</span></span>
+        <span class="logo-stack" aria-hidden="true"><span class="logo-top">Gear</span><span class="logo-bot">Maker</span></span>
         <span class="logo-brk" aria-hidden="true">]</span>
       </h1>
       <div class="logo-rule" aria-hidden="true"></div>
@@ -46,29 +46,15 @@
     </header>
 
     <section id="secSamples">
-      <h2>Samples</h2>
-      <select id="sampleSel" aria-label="Sample to load"></select>
-      <p class="note" id="sampleNote"></p>
-      <div class="row2">
-        <button type="button" class="go" id="loadSample" data-tip="Load sample&#10;Clears the table and builds the sample.">Load</button>
-        <button type="button" id="addSample" data-tip="Add to table&#10;Builds the sample beside what is already there.">Add beside</button>
-      </div>
+      <h2>Samples <i class="count" id="sampleCount">0</i></h2>
+      <p class="note" id="sampleNote">Click a sample to load it. It replaces what is on the table; the + button adds it beside.</p>
+      <div class="slist" id="sampleList" role="list"></div>
     </section>
 
     <section id="secGears">
       <h2>Gears on the table <i class="count" id="gearCount">0</i></h2>
       <div class="glist" id="gearList"></div>
       <button type="button" class="wide" id="addBtn2"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>Add gear</span></button>
-    </section>
-
-    <section id="secView">
-      <h2>Playback &amp; view</h2>
-      <button type="button" class="tgl" id="playBtn" aria-pressed="true"><svg viewBox="0 0 24 24" class="ic-on"><path d="M8 5v14M16 5v14"/></svg><svg viewBox="0 0 24 24" class="ic-off"><path d="M8 5l11 7-11 7z"/></svg><span>Spinning</span><em>on</em></button>
-      <div class="sl"><label for="speedR">Speed</label><input type="range" id="speedR" min="0" max="4" step="0.05" value="1"><b id="speedV">1.00×</b></div>
-      <button type="button" class="tgl" id="helpBtn" aria-pressed="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 2v20" stroke-dasharray="2 3"/></svg><span>Pitch circle &amp; axis</span><em>on</em></button>
-      <button type="button" class="tgl" id="gridBtn" aria-pressed="true"><svg viewBox="0 0 24 24"><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg><span>Floor grid</span><em>on</em></button>
-      <label class="sel-l" for="qualSel">Mesh quality</label>
-      <select id="qualSel"><option value="0">Draft — fastest</option><option value="1" selected>Normal</option><option value="2">Fine — smoothest export</option></select>
     </section>
 
     <section id="secProject">
@@ -82,7 +68,7 @@
         <button type="button" class="danger" id="clearBtn">Clear all</button>
       </div>
     </section>
-    <footer class="side-foot">Gearworks is MIT licensed. Fonts: Inter, Bebas Neue (OFL).</footer>
+    <footer class="side-foot">Gear Maker is MIT licensed. Fonts: Inter, Bebas Neue (OFL).</footer>
   </aside>
 
   <!-- ============ the stage ============ -->
@@ -93,10 +79,20 @@
       <span class="mk"><b class="mouse m"></b>Wheel: zoom</span>
       <span class="mk">Click a gear to edit it</span>
     </div>
+    <div class="vp" id="vp" role="toolbar" aria-label="History, playback and view">
+      <button class="ib" id="undoBtn" disabled data-tip="Undo&#10;Ctrl + Z"><svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3"/></svg></button>
+      <button class="ib" id="redoBtn" disabled data-tip="Redo&#10;Ctrl + Y"><svg viewBox="0 0 24 24"><path d="m15 14 5-5-5-5M20 9H10a6 6 0 0 0 0 12h3"/></svg></button>
+      <i class="vp-sep"></i>
+      <button class="ib" id="playBtn" aria-pressed="true" data-tip="Spin&#10;Pause or resume the gears (Space)."><svg viewBox="0 0 24 24" class="ic-on"><path d="M8 5v14M16 5v14"/></svg><svg viewBox="0 0 24 24" class="ic-off"><path d="M8 5l11 7-11 7z"/></svg></button>
+      <label class="vp-sl" data-tip="Speed&#10;How fast the gears turn."><input type="range" id="speedR" min="0" max="4" step="0.05" value="1" aria-label="Speed"><b id="speedV">1.00×</b></label>
+      <button class="ib" id="helpBtn" aria-pressed="true" data-tip="Pitch circle &amp; axis&#10;Guide lines on the selected gear."><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 2v20" stroke-dasharray="2 3"/></svg></button>
+      <select id="qualSel" class="vp-sel" aria-label="Mesh quality" data-tip="Mesh quality&#10;Fine gives the smoothest export."><option value="0">Draft</option><option value="1" selected>Normal</option><option value="2">Fine</option></select>
+    </div>
     <div class="views" id="views">
       <button class="ib" data-view="iso" data-tip="Isometric view"><svg viewBox="0 0 24 24"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9zM12 12l8-4.5M12 12v9M12 12 4 7.5"/></svg></button>
       <button class="ib" data-view="top" data-tip="Top view"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2.5"/></svg></button>
       <button class="ib" data-view="front" data-tip="Front view"><svg viewBox="0 0 24 24"><rect x="4" y="8" width="16" height="8" rx="1"/></svg></button>
+      <button class="ib" id="gridQuick" aria-pressed="true" data-tip="Floor grid&#10;Fade the grid out or back in (G)."><svg viewBox="0 0 24 24"><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg></button>
       <button class="ib" data-view="fit" data-tip="Frame everything"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
     </div>
     <div class="empty" id="empty"><div><b>Nothing on the table</b><span>Load a sample on the left, or add a gear.</span></div></div>
@@ -130,12 +126,14 @@
 <script src="js/compat.js?v=1"></script>
 <script src="js/mount.js?v=1"></script>
 <script src="js/gears.js?v=1"></script>
+<script src="js/history.js?v=1"></script>
 <script src="js/scene.js?v=1"></script>
 <script src="js/drives.js?v=1"></script>
 <script src="js/brep.js?v=1"></script>
 <script src="js/exporters.js?v=1"></script>
 <script src="js/presets.js?v=1"></script>
 <script src="js/ui.js?v=1"></script>
+<script src="js/preview.js?v=1"></script>
 <script src="js/guide.js?v=1"></script>
 <script src="js/app.js?v=1"></script>
 </body>

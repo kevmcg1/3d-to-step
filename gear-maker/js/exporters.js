@@ -1,7 +1,7 @@
 "use strict";
-/* Gearworks — STL / OBJ / STEP export and a tiny ZIP writer.
+/* Gear Maker — STL / OBJ / STEP export and a tiny ZIP writer.
    Everything works on plain "solids": { name, pos: Float32Array of triangle corners (x,y,z...) }.
-   Units are millimetres, +Z is up (so STL/OBJ/STEP open the right way round in CAD and slicers). */
+   Units are millimeters, +Z is up (so STL/OBJ/STEP open the right way round in CAD and slicers). */
 (function(){
 const U = GW.U, T = THREE;
 
@@ -129,7 +129,7 @@ const Export = GW.Export = {
   stlBinary(solids, name){
     const tris = solids.reduce((s, x) => s + x.pos.length / 9, 0);
     const buf = new ArrayBuffer(84 + tris * 50), dv = new DataView(buf);
-    const head = ('Gearworks ' + (name || '')).slice(0, 79);
+    const head = ('Gear Maker ' + (name || '')).slice(0, 79);
     for(let i = 0; i < head.length; i++) dv.setUint8(i, head.charCodeAt(i));
     dv.setUint32(80, tris, true);
     let o = 84;
@@ -167,7 +167,7 @@ const Export = GW.Export = {
 
   /* ------------------------------------------------------------------ OBJ */
   obj(solids){
-    const lines = ['# Gearworks export — units: millimetres, +Z up'];
+    const lines = ['# Gear Maker export — units: millimeters, +Z up'];
     let base = 1;
     const f = v => (+v.toFixed(5)).toString();
     solids.forEach(s => {
@@ -196,7 +196,7 @@ const Export = GW.Export = {
     let id = 0;
     const E = s => { L.push(`#${++id}=${s};`); return id; };
     const f = v => { let s = (+v.toFixed(6)).toString(); if(s === '-0') s = '0'; if(s.indexOf('.') < 0 && s.indexOf('e') < 0) s += '.'; return s; };
-    const pname = (name || 'Gearworks').replace(/[^A-Za-z0-9_\- ]/g, '');
+    const pname = (name || 'Gear Maker').replace(/[^A-Za-z0-9_\- ]/g, '');
     const appCtx = E("APPLICATION_CONTEXT('core data for automotive mechanical design processes')");
     E(`APPLICATION_PROTOCOL_DEFINITION('international standard','automotive_design',2000,#${appCtx})`);
     const prodCtx = E(`PRODUCT_CONTEXT('',#${appCtx},'mechanical')`);
@@ -265,8 +265,8 @@ const Export = GW.Export = {
     E(`SHAPE_DEFINITION_REPRESENTATION(#${pds},#${rep})`);
     const header = [
       'ISO-10303-21;', 'HEADER;',
-      "FILE_DESCRIPTION(('Gearworks gear export'),'2;1');",
-      `FILE_NAME('${pname}.step','${new Date().toISOString().slice(0, 19)}',('Gearworks'),(''),'Gearworks','Gearworks','');`,
+      "FILE_DESCRIPTION(('Gear Maker gear export'),'2;1');",
+      `FILE_NAME('${pname}.step','${new Date().toISOString().slice(0, 19)}',('Gear Maker'),(''),'Gear Maker','Gear Maker','');`,
       "FILE_SCHEMA(('AUTOMOTIVE_DESIGN { 1 0 10303 214 1 1 1 1 }'));", 'ENDSEC;', 'DATA;'
     ];
     return new TextEncoder().encode(header.join('\n') + '\n' + L.join('\n') + '\nENDSEC;\nEND-ISO-10303-21;\n');
@@ -277,7 +277,7 @@ const Export = GW.Export = {
   files(opts, selId){
     const solids = Export.collect(opts.scope, opts.pose, selId, opts.drives !== false && opts.pose === 'world');
     if(!solids.length) return [];
-    const base = Export.safe(opts.name || 'gearworks');
+    const base = Export.safe(opts.name || 'gear-maker');
     const ext = { stl: 'stl', stla: 'stl', obj: 'obj', step: 'step' }[opts.format];
     const one = list => {
       const nm = list.length === 1 ? list[0].name : base;

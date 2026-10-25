@@ -1,7 +1,7 @@
 {
-  "name": "gearworks",
+  "name": "gear-maker",
   "version": "1.0.0",
-  "description": "3D gear lab in the browser: 16 kinds of gear, mesh-compatibility checker, STL / OBJ / STEP export.",
+  "description": "3D gear designer in the browser: 16 kinds of gear, mesh-compatibility checker, STL / OBJ / STEP export.",
   "license": "MIT",
   "scripts": {
     "start": "cd .. && python3 -m http.server 8080",

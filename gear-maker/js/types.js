@@ -1,5 +1,5 @@
 "use strict";
-/* Gearworks — the catalogue of gear types and every setting each one has.
+/* Gear Maker — the catalog of gear types and every setting each one has.
    The UI panel is generated from PARAMS + TYPES.keys, so adding a setting
    here adds a control there. */
 (function(){
@@ -33,13 +33,13 @@ const FINISH = {
   brass:    { label: 'Brass',        color: '#c9a24b', metal: 0.55, rough: 0.45 },
   steel:    { label: 'Steel',        color: '#9aa4b0', metal: 0.70, rough: 0.38 },
   copper:   { label: 'Copper',       color: '#b96f4a', metal: 0.60, rough: 0.42 },
-  aluminum: { label: 'Aluminium',    color: '#c8ced6', metal: 0.75, rough: 0.33 },
+  aluminum: { label: 'Aluminum',    color: '#c8ced6', metal: 0.75, rough: 0.33 },
   bronze:   { label: 'Bronze',       color: '#8c6a3b', metal: 0.55, rough: 0.50 },
   black:    { label: 'Black oxide',  color: '#3a3f46', metal: 0.50, rough: 0.55 },
   nylon:    { label: 'Nylon white',  color: '#e9e6dc', metal: 0.00, rough: 0.60 },
   pla:      { label: 'PLA orange',   color: '#e8742c', metal: 0.00, rough: 0.50 },
   petg:     { label: 'PETG blue',    color: '#3b82c4', metal: 0.05, rough: 0.35 },
-  custom:   { label: 'Custom colour', color: null }
+  custom:   { label: 'Custom color', color: null }
 };
 
 /* ---- settings ----
@@ -60,13 +60,13 @@ const PARAMS = {
   helix:      ['Helix angle', 'num', 'Profile', -45, 45, 0.5, '°', 'Tooth lean. + is right hand, − is left hand. Meshing pairs need opposite hands.'],
   spiral:     ['Spiral angle', 'num', 'Profile', -60, 60, 0.5, '°', 'Curve of the teeth across the face. Meshing pairs need opposite signs.'],
   cone:       ['Pitch cone angle', 'num', 'Profile', 3, 87, 0.5, '°', 'Half-angle of the pitch cone. Set automatically from the tooth ratio when meshed.'],
-  vgap:       ['Centre groove', 'num', 'Profile', 0, 30, 0.5, 'mm', 'Relief groove between the two helical halves.'],
+  vgap:       ['Center groove', 'num', 'Profile', 0, 30, 0.5, 'mm', 'Relief groove between the two helical halves.'],
 
   thick:      ['Face width', 'num', 'Body', 0.5, 150, 0.5, 'mm', 'How wide the gear is along its axis.'],
   bodyStyle:  ['Body style', 'sel', 'Body', null, null, null, ['solid', 'webbed', 'spoked']],
   rimW:       ['Rim width', 'num', 'Body', 0.5, 40, 0.5, 'mm', 'Radial thickness of the rim (webbed / spoked / ring).'],
   webT:       ['Web / spoke thickness', 'num', 'Body', 0.5, 40, 0.5, 'mm', ''],
-  webOff:     ['Web offset', 'num', 'Body', -30, 30, 0.5, 'mm', 'Moves the web off the centre plane.'],
+  webOff:     ['Web offset', 'num', 'Body', -30, 30, 0.5, 'mm', 'Moves the web off the center plane.'],
   spokes:     ['Spokes', 'int', 'Body', 2, 12, 1, '', ''],
   spokeW:     ['Spoke width', 'num', 'Body', 1, 40, 0.5, 'mm', ''],
   holeN:      ['Lightening holes', 'int', 'Body', 0, 24, 1, '', 'Holes through the disc or web (rack: holes along the bar).'],
@@ -105,7 +105,7 @@ const PARAMS = {
 
   rollR:      ['Rolling circle radius', 'num', 'Cycloid', 0.5, 80, 0.1, 'mm', 'Generating circle. Must match to mesh.'],
 
-  majorA:     ['Semi-major axis', 'num', 'Ellipse', 5, 200, 0.5, 'mm', 'Pair centre distance is twice this.'],
+  majorA:     ['Semi-major axis', 'num', 'Ellipse', 5, 200, 0.5, 'mm', 'Pair center distance is twice this.'],
   ecc:        ['Eccentricity', 'num', 'Ellipse', 0, 0.8, 0.01, '', '0 = circle. Higher = more speed variation.'],
   phase:      ['Tooth phase', 'num', 'Ellipse', 0, 1, 0.01, 'pitch', 'Shifts the teeth along the curve.'],
 
@@ -119,7 +119,7 @@ const PARAMS = {
   rpm:        ['Speed', 'num', 'Motion', -300, 300, 0.5, 'rpm', 'Driving speed (− reverses). Meshed gears follow their parent.'],
 
   finish:     ['Finish', 'sel', 'Appearance', null, null, null, Object.keys(FINISH)],
-  color:      ['Colour', 'color', 'Appearance'],
+  color:      ['Color', 'color', 'Appearance'],
   metal:      ['Metalness', 'num', 'Appearance', 0, 1, 0.05, ''],
   rough:      ['Roughness', 'num', 'Appearance', 0, 1, 0.05, ''],
   opacity:    ['Opacity', 'num', 'Appearance', 0.1, 1, 0.05, ''],
@@ -132,12 +132,12 @@ const LINK_PARAMS = {
   linkKind:   ['Connection', 'sel', 'Mesh', null, null, null, ['mesh', 'same shaft']],
   meshAngle:  ['Position around partner', 'num', 'Mesh', -180, 180, 1, '°', 'Which side of the partner this gear sits on.'],
   shaftAngle: ['Shaft angle', 'num', 'Mesh', 10, 170, 0.5, '°', 'Angle between the two shafts (bevel gears).'],
-  meshOffset: ['Extra centre distance', 'num', 'Mesh', -20, 400, 0.1, 'mm', 'Added to the ideal centre distance (chain and belt: the span between sprockets).'],
+  meshOffset: ['Extra center distance', 'num', 'Mesh', -20, 400, 0.1, 'mm', 'Added to the ideal center distance (chain and belt: the span between sprockets).'],
   shaftOffset:['Offset along shaft', 'num', 'Mesh', -200, 200, 0.5, 'mm', 'Slides this gear along the shared shaft or the partner axis.'],
   shaftPhase: ['Rotation phase', 'num', 'Mesh', -180, 180, 1, '°', 'Turns this gear on the shared shaft.']
 };
 
-/* ---- type catalogue ---- */
+/* ---- type catalog ---- */
 const TOOTH = ['m', 'z', 'pa', 'ha', 'hf', 'x', 'backlash', 'fillet'];
 const BODY  = ['thick', 'bodyStyle', 'rimW', 'webT', 'webOff', 'spokes', 'spokeW', 'holeN', 'holeD', 'holePCD', 'chamfer',
                'bore', 'keyW', 'keyD', 'dFlat', 'hubDia', 'hubUp', 'hubDown'];

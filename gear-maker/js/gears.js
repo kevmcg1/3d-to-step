@@ -1,5 +1,5 @@
 "use strict";
-/* Gearworks — the list of gears, their links, and the per-frame layout. */
+/* Gear Maker — the list of gears, their links, and the per-frame layout. */
 (function(){
 const U = GW.U, T = THREE, Types = GW.Types;
 const Z = new T.Vector3(0, 0, 1);
@@ -43,7 +43,7 @@ const Gears = GW.Gears = {
     Gears.restyle(g);
     Gears.dirty = true;
     // pop in: grows from nothing with a little overshoot
-    if(GW.Anim && !opts.instant){
+    if(GW.Anim && !opts.instant && !Gears._instant){
       g.scale = 0.001;
       GW.Anim.tween(420, (p, e) => { g.scale = Math.max(0.001, e); }, { ease: 'back', delay: opts.delay || 0, done: () => { g.scale = 1; } });
     } else g.scale = 1;
@@ -287,7 +287,7 @@ const Gears = GW.Gears = {
   /* ------------------------------------------------------------ save / load */
   toJSON(){
     return {
-      app: 'gearworks', version: 1,
+      app: 'gear-maker', version: 1,
       gears: Gears.list.map(g => {
         const o = {}; Object.keys(Types.BASE).forEach(k => { o[k] = g[k]; }); o.id = g.id;
         const e = new T.Euler().setFromQuaternion(g.rt.quat, 'XYZ');
@@ -297,7 +297,7 @@ const Gears = GW.Gears = {
     };
   },
   fromJSON(data){
-    Gears.clear();
+    Gears.clear({ instant: !!Gears._instant });
     const idMap = {};
     (data.gears || []).forEach(o => {
       if(!Types.TYPES[o.type]) return;
@@ -342,8 +342,28 @@ const Layout = GW.Layout = {
       if(!P) g.rt.omega = g.rpm * (g.type === 'rack' ? 1 : Math.PI / 30);
       else g.rt.omega = g.rt.link.mode === 'ratio' ? g.rt.link.kappa * P.rt.omega : P.rt.omega;
     });
+    // a rack has a finite length: whatever drives it goes back and forth instead of round and round
+    order.forEach(g => {
+      if(g.parentId){ g.rt.osc = null; return; }
+      const prev = g.rt.osc, o = Layout.rackStroke(g);
+      if(!o){ g.rt.osc = null; return; }
+      g.rt.osc = prev ? Object.assign(prev, o) : Object.assign(o, { ph: 0, q0: g.rt.q });
+    });
     Gears.version = (Gears.version || 0) + 1;
     Gears.dirty = false;
+  },
+
+  /* amplitude (in the root gear's own units) that keeps the rack's travel inside its length, or null */
+  rackStroke(root){
+    const all = [root].concat(Gears.descendants(root.id));
+    const R = all.find(x => x.type === 'rack' && ((x.parentId && x.rt.link && x.rt.link.kind === 'rack') || Gears.children(x.id).some(c => c.rt.link && c.rt.link.kind === 'rack')));
+    if(!R) return null;
+    const pin = R.parentId ? Gears.get(R.parentId) : Gears.children(R.id).find(c => c.rt.link && c.rt.link.kind === 'rack');
+    const p = Math.PI * R.m, S = Math.max(2 * p, R.z * p - 2 * Gears.reach(pin) - 2);
+    let ratio = 1, c = R;
+    while(c.parentId){ const l = c.rt.link; ratio *= l && l.mode === 'ratio' ? l.kappa : 1; c = Gears.get(c.parentId); }
+    if(!isFinite(ratio) || Math.abs(ratio) < 1e-6) return null;
+    return { amp: (S / 2) / Math.abs(ratio) };
   },
 
   update(dt){
@@ -351,7 +371,11 @@ const Layout = GW.Layout = {
     Gears.order.forEach(g => {
       const P = g.parentId ? Gears.get(g.parentId) : null;
       if(!P){
-        if(Gears.spin) g.rt.q += g.rpm * (g.type === 'rack' ? 1 : Math.PI / 30) * dt * Gears.speed;
+        const w = g.rpm * (g.type === 'rack' ? 1 : Math.PI / 30), o = g.rt.osc;
+        if(o){
+          if(Gears.spin) o.ph += Math.abs(w) * dt * Gears.speed / Math.max(o.amp, 1e-6) * Math.sign(w || 1);
+          g.rt.q = o.q0 + o.amp * Math.sin(o.ph);
+        } else if(Gears.spin) g.rt.q += w * dt * Gears.speed;
       } else g.rt.q = GW.Mount.follow(g.rt.link, P.rt.q);
       Layout.apply(g);
     });
@@ -362,7 +386,7 @@ const Layout = GW.Layout = {
     m.position.copy(g.rt.pos);
     if(g.scale != null) m.scale.setScalar(g.scale);
     if(g.type === 'rack'){
-      const p = Math.PI * g.m, s = U.mod(g.rt.q, p);
+      const p = Math.PI * g.m, s = g.parentId || g.rt.osc ? g.rt.q : U.mod(g.rt.q, p);   // finite stroke: no wrapping
       m.position.add(new T.Vector3(1, 0, 0).applyQuaternion(g.rt.quat).multiplyScalar(s));
       m.quaternion.copy(g.rt.quat);
     } else {

@@ -1,5 +1,5 @@
 "use strict";
-/* Gearworks — the interface.
+/* Gear Maker — the interface.
    Left sidebar  : samples, the gears on the table, playback and view, project.
    Right sidebar : every property of the selected gear. Everything is live: a change is applied on the
                    next animation frame, with coarse "draft" meshes while a slider is being dragged and a
@@ -37,6 +37,7 @@ const UI = GW.UI = {
     UI.initBar();
     G().onChange((what, g) => UI.onChange(what, g));
     document.addEventListener('keydown', UI.onKey);
+    if(window.innerWidth <= 640) UI.toggleFeedback(true);
     UI.mark({ list: 1, props: 1, fb: 1 });
   },
 
@@ -77,10 +78,20 @@ const UI = GW.UI = {
   onKey(e){
     if(e.key === 'Escape'){ UI.closeModal(); UI.drawer(null); if(GW.Guide && GW.Guide.active) GW.Guide.stop(false); return; }
     if(GW.Guide && GW.Guide.active) return;
+    if((e.ctrlKey || e.metaKey) && !e.altKey){
+      const k = e.key.toLowerCase(), t = e.target;
+      const typing = t && t.matches && (t.matches('textarea') || t.matches('input:not([type=range]):not([type=checkbox])')) ;
+      if(!typing && !document.querySelector('.modal-bg.show') && (k === 'z' || k === 'y')){
+        e.preventDefault();
+        if(k === 'y' || e.shiftKey) GW.History.redo(); else GW.History.undo();
+      }
+      return;
+    }
     if(e.target.matches && e.target.matches('input,select,textarea')) return;
     if((e.key === 'Delete' || e.key === 'Backspace') && UI.selId && !document.querySelector('.modal-bg.show')){ e.preventDefault(); UI.deleteSel(); }
     else if(e.key === ' '){ e.preventDefault(); UI.setPlaying(!G().spin); }
     else if(e.key === 'f' || e.key === 'F') GW.Scene.fit();
+    else if(e.key === 'g' || e.key === 'G') GW.Scene.setGrid(!GW.Scene.gridOn);
   },
 
   /* ================================================================== tooltips */
@@ -114,6 +125,7 @@ const UI = GW.UI = {
     UI.updateEmpty();
   },
   onChange(what, g){
+    if(what !== 'soft') GW.History.touch();
     if(what === 'remove' && UI.selId === g.id){ UI.selId = null; UI.mark({ props: 1 }); }
     if(what === 'load'){ UI.selId = null; UI.mark({ props: 1 }); }
     UI.mark({ list: 1, fb: 1, helpers: 1, sync: 1 });
@@ -160,29 +172,43 @@ const UI = GW.UI = {
 
   /* ================================================================== left: samples */
   initLeft(){
-    // samples
-    const sel = $('sampleSel');
-    const groups = {};
+    // samples: a list of cards; clicking one loads it, the + beside it adds it next to what is there
+    const sl = $('sampleList'), groups = {};
     GW.Presets.forEach(p => { (groups[p.group] = groups[p.group] || []).push(p); });
+    $('sampleCount').textContent = GW.Presets.length;
     Object.keys(groups).forEach(gr => {
-      const og = make('optgroup'); og.label = gr;
-      groups[gr].forEach(p => { const o = make('option', null, p.name); o.value = p.id; og.appendChild(o); });
-      sel.appendChild(og);
+      sl.appendChild(make('h3', 'sgrp', gr));
+      groups[gr].forEach(p => {
+        const row = make('div', 'srow'); row.dataset.id = p.id;
+        const line = make('div', 'sline');
+        const b = make('button', 'sbtn'); b.type = 'button'; b.dataset.id = p.id;
+        b.innerHTML = `<span class="sn">${esc(p.name)}</span><span class="sd">${esc(p.note)}</span>`;
+        b.onclick = () => { GW.Preview.hide(); UI.markSample(p.id); UI.loadSample(p, true); };
+        const info = make('button', 'sinfo'); info.type = 'button'; info.dataset.id = p.id; info.textContent = '?';
+        info.setAttribute('aria-label', 'Explain ' + p.name); info.setAttribute('aria-expanded', 'false'); info.dataset.tip = 'What is happening?\nA plain-English explanation.';
+        const why = make('div', 'sx'); why.innerHTML = '<div><p>' + esc(p.why) + '</p></div>';
+        info.onclick = e => { e.stopPropagation(); const o = !row.classList.contains('open'); row.classList.toggle('open', o); info.setAttribute('aria-expanded', o); };
+        const add = make('button', 'sadd'); add.type = 'button'; add.dataset.id = p.id; add.textContent = '+';
+        add.setAttribute('aria-label', 'Add ' + p.name + ' beside the others'); add.dataset.tip = 'Add beside\nBuilds it next to what is already there.';
+        add.onclick = e => { e.stopPropagation(); UI.loadSample(p, false); };
+        const prev = on => () => { if(on) GW.Preview.show({ sample: p, anchor: row, side: 'right' }); else GW.Preview.hide(); };
+        row.addEventListener('pointerenter', prev(true)); row.addEventListener('pointerleave', prev(false));
+        b.addEventListener('focus', prev(true)); b.addEventListener('blur', prev(false));
+        line.append(b, info, add); row.append(line, why); sl.appendChild(row);
+      });
     });
-    const showNote = () => { const p = GW.Presets.find(x => x.id === sel.value); const n = $('sampleNote'); n.style.opacity = 0; setTimeout(() => { n.textContent = p ? p.note : ''; n.style.opacity = 1; }, 120); };
-    sel.onchange = showNote; sel.value = 'planetary'; $('sampleNote').textContent = GW.Presets.find(x => x.id === 'planetary').note;
-    $('loadSample').onclick = () => UI.loadSample(GW.Presets.find(x => x.id === sel.value), true);
-    $('addSample').onclick = () => UI.loadSample(GW.Presets.find(x => x.id === sel.value), false);
 
     // playback
     $('playBtn').onclick = () => UI.setPlaying(!G().spin);
+    $('undoBtn').onclick = () => GW.History.undo(); $('redoBtn').onclick = () => GW.History.redo();
+    GW.History.onState = () => { $('undoBtn').disabled = GW.History.at <= 0; $('redoBtn').disabled = GW.History.at >= GW.History.stack.length - 1; };
     const sp = $('speedR');
     const fill = el => el.style.setProperty('--fill', ((+el.value - el.min) / (el.max - el.min) * 100) + '%');
     sp.oninput = () => { G().speed = +sp.value; $('speedV').textContent = (+sp.value).toFixed(2) + '×'; fill(sp); };
     fill(sp);
-    const tg = (id, get, set, label) => { const b = $(id); b.onclick = () => { const v = !get(); set(v); b.setAttribute('aria-pressed', v); b.querySelector('em').textContent = v ? 'on' : 'off'; }; };
+    const tg = (id, get, set) => { const b = $(id); b.onclick = () => { const v = !get(); set(v); b.setAttribute('aria-pressed', v); }; };
     tg('helpBtn', () => GW.Scene.showHelpers, v => { GW.Scene.showHelpers = v; GW.Scene.updateHelpers(UI.sel()); });
-    tg('gridBtn', () => GW.Scene.grid.visible, v => { GW.Scene.grid.visible = v; });
+    $('gridQuick').onclick = () => GW.Scene.setGrid(!GW.Scene.gridOn);
     $('qualSel').onchange = () => { GW.Build.quality = +$('qualSel').value; const t0 = performance.now(); G().list.forEach(g => G().rebuild(g)); UI.toast('Rebuilt every gear at ' + ['draft', 'normal', 'fine'][GW.Build.quality] + ' quality.'); UI.mark({ fb: 1 }); };
 
     // project
@@ -192,10 +218,11 @@ const UI = GW.UI = {
     $('clearBtn').onclick = () => UI.confirm('Remove every gear from the table?', 'Clear all', () => { G().clear({ stagger: 40 }); UI.toast('The table is clear.'); });
   },
 
+  markSample(id){ document.querySelectorAll('#sampleList .srow').forEach(r => r.classList.toggle('on', r.dataset.id === id)); },
+
   setPlaying(on){
     G().spin = on;
-    const b = $('playBtn'); b.setAttribute('aria-pressed', on); b.querySelector('em').textContent = on ? 'on' : 'off';
-    b.querySelector('span').textContent = on ? 'Spinning' : 'Paused';
+    $('playBtn').setAttribute('aria-pressed', on);
   },
 
   /* load or add a sample, with the old gears shrinking away and the new ones popping in one by one */
@@ -212,14 +239,17 @@ const UI = GW.UI = {
       UI.selId = null; UI.select(made[0].id);
       UI.toast(p.name + (replace ? ' loaded.' : ' added beside the others.'));
       UI.mark({ list: 1, fb: 1 });
+      GW.History.busy = false; GW.History.touch();
     };
+    GW.History.busy = true;
     if(replace && G().list.length){ const n = G().list.length; G().clear({ stagger: 35 }); UI.selId = null; UI.mark({ props: 1, list: 1, fb: 1, helpers: 1 }); setTimeout(build, 260 + 35 * n); }
     else build();
   },
 
   resetAll(){
+    GW.History.busy = true;
     G().clear({ stagger: 25 }); UI.selId = null;
-    setTimeout(() => { UI.startPair(); }, 300);
+    setTimeout(() => { UI.startPair(); GW.History.busy = false; GW.History.touch(); }, 300);
   },
   /* the opening scene: a driver and a driven spur gear */
   startPair(instant){
@@ -311,6 +341,8 @@ const UI = GW.UI = {
     const sub = make('div', 'ph-sub');
     sub.innerHTML = `<span class="tag">${TYPES[g.type].label}</span> <span id="phDesc" style="margin-left:4px">${esc(TYPES[g.type].desc)}</span>`;
     h.appendChild(sub);
+    // the gear type is a setting like any other: change it and the controls below follow
+    const tc = UI.control(g, 'type'); UI.ctl.type = tc; tc.row.classList.add('ph-type'); h.appendChild(tc.row);
     return h;
   },
 
@@ -523,8 +555,9 @@ const UI = GW.UI = {
       const res = A ? GW.Compat.check(A, g, { kind: UI.linkChoice === 'same shaft' ? 'shaft' : 'mesh' }) : null;
       const bt = make('div', 'cbtns');
       if(A && !(g.parentId === A.id && g.linkKind === UI.linkChoice)){
-        const go = make('button', 'go', res && res.ok ? (UI.linkChoice === 'mesh' ? 'Mesh them' : 'Put on same shaft') : (res && res.supported ? 'Fix this gear & mesh' : 'Change & mesh'));
-        go.onclick = () => UI.doLink(A, g, UI.linkChoice, res && res.ok ? null : 'B');
+        const fixable = res && res.issues.some(i => i.level === 'err' && i.optB);
+        const go = make('button', 'go', res && res.ok ? (UI.linkChoice === 'mesh' ? 'Mesh them' : 'Put on same shaft') : (fixable ? (res.supported ? 'Fix this gear & mesh' : 'Change & mesh') : 'Connect anyway'));
+        go.onclick = () => UI.doLink(A, g, UI.linkChoice, res && res.ok || !fixable ? null : 'B');
         bt.appendChild(go);
       }
       host.appendChild(bt);
@@ -639,7 +672,7 @@ const UI = GW.UI = {
       if(mode === 'free' && P && res){
         if(res.ok) actions.push(`<button class="mini go" data-act="mesh">${UI.linkChoice === 'mesh' ? 'Mesh them' : 'Put on same shaft'}</button>`);
         else if(res.supported){
-          actions.push(`<button class="mini go" data-act="fixmesh-B">Fix ${esc(g.name)} &amp; mesh</button>`);
+          if(errs.some(i => i.optB)) actions.push(`<button class="mini go" data-act="fixmesh-B">Fix ${esc(g.name)} &amp; mesh</button>`);
           if(errs.some(i => i.optA)) actions.push(`<button class="mini" data-act="fixmesh-A">Fix ${esc(P.name)} &amp; mesh</button>`);
           actions.push(`<button class="mini" data-act="force">Mesh anyway</button>`);
         }
@@ -716,8 +749,18 @@ const UI = GW.UI = {
     UI.openModal(`<div class="mhead"><h3>Are you sure?</h3></div><div class="mbody"><p style="font-size:14px;line-height:1.5">${esc(msg)}</p><div class="mfoot"><button id="cNo">Cancel</button><button class="danger" id="cYes">${esc(label)}</button></div></div>`);
     $('cNo').onclick = UI.closeModal; $('cYes').onclick = () => { UI.closeModal(); fn(); };
   },
-  toast(msg, ms){
-    const t = $('toast'); t.textContent = msg; t.classList.add('show');
+  /* the little status card: an icon for what kind of message it is, and an outline that draws itself
+     once around the card each time a message arrives */
+  toast(msg, ms, kind){
+    const t = $('toast');
+    kind = kind || (/cannot|could not|failed|not a /i.test(msg) ? 'bad' : /but the teeth|\bbut\b.*(fit|mesh)/i.test(msg) ? 'warn' : /^(undid|redid)/i.test(msg) ? 'undo' : /deleted|removed|clear|free again/i.test(msg) ? 'del' : 'ok');
+    const ic = { ok: '<path d="M5 12.5l4.5 4.5L19 7.5"/>', bad: '<circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.5v.1"/>', warn: '<path d="M12 4 2.8 20h18.4zM12 10v5M12 17.5v.1"/>', del: '<path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13"/>', undo: '<path d="M9 14 4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3"/>' }[kind];
+    t.className = 'toast ' + kind;
+    t.innerHTML = '<svg class="t-ic" viewBox="0 0 24 24">' + ic + '</svg><span class="t-tx"></span><svg class="t-ring" preserveAspectRatio="none"><rect pathLength="1" x="0.75" y="0.75" rx="10" ry="10"/></svg>';
+    t.querySelector('.t-tx').textContent = msg;
+    const r = t.querySelector('.t-ring rect'); const b = t.getBoundingClientRect();
+    r.setAttribute('width', Math.max(10, b.width - 1.5)); r.setAttribute('height', Math.max(10, b.height - 1.5));
+    t.classList.remove('show'); void t.offsetWidth; t.classList.add('show');
     clearTimeout(UI._tt); UI._tt = setTimeout(() => t.classList.remove('show'), ms || 3000);
   },
 
@@ -732,8 +775,12 @@ const UI = GW.UI = {
     });
     UI.openModal(html + '</div>');
     $('mClose').onclick = UI.closeModal;
+    document.querySelectorAll('#modal .card').forEach(c => {
+      const on = () => GW.Preview.show({ type: c.dataset.t, anchor: c, side: 'right' }), off = () => GW.Preview.hide();
+      c.addEventListener('pointerenter', on); c.addEventListener('pointerleave', off); c.addEventListener('focus', on); c.addEventListener('blur', off);
+    });
     document.querySelectorAll('#modal .card').forEach(c => c.onclick = () => {
-      UI.closeModal();
+      GW.Preview.hide(); UI.closeModal();
       const g = G().add(c.dataset.t);
       GW.Scene.fit(false, G().list);
       UI.selId = null; UI.select(g.id);
@@ -752,13 +799,13 @@ const UI = GW.UI = {
 
   saveProject(){
     const blob = new Blob([JSON.stringify(G().toJSON(), null, 1)], { type: 'application/json' });
-    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'gearworks-project.json';
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'gear-maker-project.json';
     document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
   },
   loadProject(file){
     const rd = new FileReader();
     rd.onload = () => {
-      try { const d = JSON.parse(rd.result); if(d.app !== 'gearworks') throw new Error('not a Gearworks project'); UI.selId = null; G().fromJSON(d); GW.Scene.fit(); UI.toast('Project loaded.'); UI.mark({ list: 1, props: 1, fb: 1, helpers: 1 }); }
+      try { const d = JSON.parse(rd.result); if(d.app !== 'gear-maker' && d.app !== 'gearworks') throw new Error('not a Gear Maker project'); UI.selId = null; G().fromJSON(d); GW.Scene.fit(); UI.toast('Project loaded.'); UI.mark({ list: 1, props: 1, fb: 1, helpers: 1 }); }
       catch(e){ UI.toast('Could not open that file: ' + e.message, 5000); }
     };
     rd.readAsText(file);
@@ -767,7 +814,7 @@ const UI = GW.UI = {
   /* ================================================================== export dialog */
   openExport(scope){
     const g = UI.sel();
-    const st = UI.exportState = Object.assign({ format: 'stl', scope: g ? 'assembly' : 'all', pose: 'world', split: false, drives: true, name: 'gearworks' }, UI.exportState || {}, scope ? { scope } : {});
+    const st = UI.exportState = Object.assign({ format: 'stl', scope: g ? 'assembly' : 'all', pose: 'world', split: false, drives: true, name: 'gear-maker' }, UI.exportState || {}, scope ? { scope } : {});
     if(!g && st.scope !== 'all') st.scope = 'all';
     const radio = (name, val, label, sub) => `<label class="opt"><input type="radio" name="${name}" value="${val}" ${st[name] === val ? 'checked' : ''}><span><b>${label}</b>${sub ? '<small>' + sub + '</small>' : ''}</span></label>`;
     UI.openModal(`<div class="mhead"><h3>Export 3D files</h3><button class="iconbtn" id="mClose" aria-label="Close">${ICON.x}</button></div>
@@ -782,7 +829,7 @@ const UI = GW.UI = {
         <div class="mrow"><label>File name</label><input type="text" id="xName" value="${esc(st.name)}"></div>
         <div class="mhint" id="xInfo"></div>
         <div class="mfoot"><button class="go" id="xGo">Download</button></div>
-        <div class="mhint">Millimetres, Z up. STEP files are faceted solids: flat areas are single faces, curved areas are small flat facets. Gears with hubs, webs or flanges export as a few overlapping solids to union in your CAD tool.</div>
+        <div class="mhint">Millimeters, Z up. STEP files are faceted solids: flat areas are single faces, curved areas are small flat facets. Gears with hubs, webs or flanges export as a few overlapping solids to union in your CAD tool.</div>
       </div>`);
     $('mClose').onclick = UI.closeModal;
     const update = () => {

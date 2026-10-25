@@ -1,5 +1,5 @@
 "use strict";
-/* Gearworks — can these two gears mesh, and what does each need from the other?
+/* Gear Maker — can these two gears mesh, and what does each need from the other?
    check(A, B) looks at B as "the gear being attached" and A as "the partner".
    It returns every problem with the exact values that would cure it, as
    changes to B ("optB") or, where that makes sense, to A ("optA"). */
@@ -115,7 +115,7 @@ const Compat = GW.Compat = {
       if(kind === 'ext'){
         const cd = C.centerDistance(A, B, false);
         info('Ratio', `${fmt(A.z)}:${fmt(B.z)}  (output ${fmt(A.z / B.z, 3)}× input speed, reversed)`);
-        info('Centre distance', `${fmt(cd.a + (B.meshOffset || 0), 3)} mm`);
+        info('Center distance', `${fmt(cd.a + (B.meshOffset || 0), 3)} mm`);
         Compat.contactAndClearance(A, B, cd, issues, info, need);
         Compat.undercut(A, issues, need); Compat.undercut(B, issues, need);
         if(ha && A.type === 'helical') info('Axial thrust', 'yes — each gear pushes sideways; use thrust bearings or herringbone');
@@ -123,14 +123,14 @@ const Compat = GW.Compat = {
         const ring = (A.type === 'internal') ? A : B, pin = ring === A ? B : A;
         const diff = ring.z - pin.z;
         const isB = pin === B;
-        if(diff < 6){
+        if(diff < 8){
           add('err', 'z', `<b>teeth</b> — ring has ${ring.z}, pinion ${pin.z}: the pinion must be smaller. Need ${need('at least 8 fewer pinion teeth')} (pinion ${need('min 6 / max ' + Math.max(6, ring.z - 8))}, or ring ${need('min ' + (pin.z + 8) + ' / max 300')})`,
             isB ? { B: { z: Math.max(6, ring.z - 8) } } : { B: { z: pin.z + 8 } },
             isB ? { A: { z: pin.z + 8 } } : { A: { z: Math.max(6, ring.z - 8) } });
-        } else if(diff < 9) add('warn', 'z', `Ring and pinion differ by only ${diff} teeth — tips may touch (involute interference). 9 or more is safer.`);
+        } else if(diff < 10) add('warn', 'z', `Ring and pinion differ by only ${diff} teeth — tips may touch (involute interference). 10 or more is safer.`);
         const cd = C.centerDistance(A, B, true);
         info('Ratio', `${fmt(ring.z)}:${fmt(pin.z)}  (same direction, ${fmt(pin.z / ring.z, 3)}× speed ratio)`);
-        info('Centre distance', `${fmt(cd.a + (B.meshOffset || 0), 3)} mm`);
+        info('Center distance', `${fmt(cd.a + (B.meshOffset || 0), 3)} mm`);
         Compat.undercut(pin, issues, need);
       } else {
         const pin = A.type === 'rack' ? B : A, rack = pin === A ? B : A;
@@ -199,7 +199,7 @@ const Compat = GW.Compat = {
       if(wheel.z < 17 / worm.starts) add('warn', 'z', `Wheel has few teeth for ${worm.starts} start(s); expect undercut. About ${Math.ceil(17 / worm.starts)}+ is usual.`);
       const ratio = wheel.z / worm.starts;
       info('Ratio', `${fmt(ratio, 2)}:1  (${worm.starts} start${worm.starts > 1 ? 's' : ''} → ${wheel.z} teeth)`);
-      info('Centre distance', `${fmt((worm.wormDia + wheel.m * wheel.z) / 2 + (B.meshOffset || 0), 3)} mm`);
+      info('Center distance', `${fmt((worm.wormDia + wheel.m * wheel.z) / 2 + (B.meshOffset || 0), 3)} mm`);
       info('Lead angle', `${fmt(gd, 2)}°  ${gd < 5 ? '— likely self-locking' : gd > 15 ? '— will back-drive' : ''}`);
     }
 
@@ -209,10 +209,11 @@ const Compat = GW.Compat = {
       mismatch('rollerDia', 'roller diameter', ' mm', { tol: 2e-2 });
       if(A.z < 9 || B.z < 9) add('warn', 'z', 'Sprockets under 9 teeth make a jerky, noisy chain drive.');
       const rA = C.pitchR(A), rB = C.pitchR(B), d = Math.max(rA + rB + B.meshOffset, (rA + rB) * 0.6);
+      Compat.driveClearance(A, B, rA, rB, d, issues, need);
       const len = C.loopLength(rA, rB, d), links = len / A.chainPitch;
       info('Ratio', `${fmt(A.z)}:${fmt(B.z)}  (same direction)`);
       info('Chain length', `${fmt(links, 1)} links  ≈ ${Math.round(links)} (${Math.round(links) % 2 ? 'odd — needs an offset link' : 'even — good'})`);
-      info('Centre distance', `${fmt(d, 2)} mm`);
+      info('Center distance', `${fmt(d, 2)} mm`);
     }
 
     /* ---------------- timing belt ---------------- */
@@ -223,10 +224,11 @@ const Compat = GW.Compat = {
       });
       if(A.z < 10 || B.z < 10) add('warn', 'z', 'Pulleys under 10 teeth wear belts quickly.');
       const rA = C.pitchR(A), rB = C.pitchR(B), d = Math.max(rA + rB + B.meshOffset, (rA + rB) * 0.6);
+      Compat.driveClearance(A, B, rA, rB, d, issues, need);
       const len = C.loopLength(rA, rB, d), teeth = len / A.beltPitch;
       info('Ratio', `${fmt(A.z)}:${fmt(B.z)}  (same direction)`);
       info('Belt length', `${fmt(teeth, 1)} teeth ≈ ${Math.round(teeth)} × ${fmt(A.beltPitch)} mm = ${fmt(Math.round(teeth) * A.beltPitch, 1)} mm`);
-      info('Centre distance', `${fmt(d, 2)} mm`);
+      info('Center distance', `${fmt(d, 2)} mm`);
     }
 
     /* ---------------- cycloidal ---------------- */
@@ -235,7 +237,7 @@ const Compat = GW.Compat = {
       mismatch('rollR', 'rolling circle radius', ' mm', { tol: 2e-3 });
       if(A.z < 8 || B.z < 8) add('warn', 'z', 'Cycloidal gears under 8 teeth are not practical.');
       info('Ratio', `${fmt(A.z)}:${fmt(B.z)}`);
-      info('Centre distance', `${fmt(A.m * (A.z + B.z) / 2 + (B.meshOffset || 0), 3)} mm`);
+      info('Center distance', `${fmt(A.m * (A.z + B.z) / 2 + (B.meshOffset || 0), 3)} mm`);
     }
 
     /* ---------------- elliptical ---------------- */
@@ -247,7 +249,7 @@ const Compat = GW.Compat = {
       const d = Math.min(Math.abs(B.phase - want), 1 - Math.abs(B.phase - want));
       if(d > 0.01) add('err', 'phase', `<b>tooth phase</b> — is ${fmt(B.phase)}, must be ${need('exactly ' + fmt(want, 3), ' pitch')} so teeth meet gaps`, { B: { phase: want } }, { A: { phase: U.mod(B.z / 2 - B.phase - 0.5, 1) } });
       info('Note', 'non-circular teeth are an approximation: allow 0.3 mm+ backlash and keep eccentricity under 0.3');
-      info('Centre distance', `${fmt(2 * A.majorA + (B.meshOffset || 0), 2)} mm (twice the semi-major axis)`);
+      info('Center distance', `${fmt(2 * A.majorA + (B.meshOffset || 0), 2)} mm (twice the semi-major axis)`);
       info('Speed', `swings between ${fmt((1 - A.ecc) / (1 + A.ecc), 2)}× and ${fmt((1 + A.ecc) / (1 - A.ecc), 2)}× each turn`);
     }
 
@@ -256,13 +258,30 @@ const Compat = GW.Compat = {
       mismatch('m', 'module', ' mm');
       mismatch('z', 'teeth', '', { tol: 1e-6 });
       mismatch('pa', 'pressure angle', '°', { tol: 1e-4 });
-      const hub = A.type === 'splinehub' ? A : B;
+      const hub = A.type === 'splinehub' ? A : B, shaft = hub === A ? B : A;
+      // the shaft's teeth must fit between the hub's: tip clear of the hub root, and root clear of the hub tip (in modules)
+      const rootRoom = (hub.hf + hub.x) - (shaft.ha + shaft.x), tipRoom = (shaft.hf - shaft.x) - (hub.ha - hub.x);
+      if(rootRoom < -1e-6 || tipRoom < -1e-6){
+        const fixHub = { ha: Math.max(0.3, Math.round(((shaft.hf - shaft.x + hub.x) - 0.05) * 100) / 100), hf: Math.max(0.5, Math.round(((shaft.ha + shaft.x - hub.x) + 0.05) * 100) / 100) };
+        const fixShaft = { ha: Math.max(0.3, Math.round(((hub.hf + hub.x - shaft.x) - 0.05) * 100) / 100), hf: Math.max(0.5, Math.round(((hub.ha - hub.x + shaft.x) + 0.05) * 100) / 100) };
+        add('err', 'clearance', `<b>tooth depth</b> — the teeth collide: hub addendum ${fmt(hub.ha)} / dedendum ${fmt(hub.hf)} must clear the shaft's ${fmt(shaft.ha)} / ${fmt(shaft.hf)}. Set the hub to ${need('addendum ' + fixHub.ha + ' / dedendum ' + fixHub.hf)}`,
+          hub === B ? { B: fixHub } : { B: fixShaft }, hub === B ? { A: fixShaft } : { A: fixHub });
+      }
       info('Fit', 'sliding fit: the shaft turns the hub 1:1 and can slide along its axis');
       if(hub.backlash < 0.01 && (A.backlash + B.backlash) < 0.01) add('warn', 'backlash', 'Zero clearance — printed or machined parts will not slide. Add 0.1 mm or more.');
     }
 
     out.ok = !issues.some(i => i.level === 'err');
     return out;
+  },
+
+  /* two sprockets or pulleys sit in one plane: their outer edges (flanges included) must not touch */
+  driveClearance(A, B, rA, rB, d, issues, need){
+    const reach = C.outerReach(A) + C.outerReach(B) + 1;
+    if(d >= reach - 1e-6) return;
+    const extra = Math.ceil((reach - rA - rB) * 10) / 10;
+    issues.push({ level: 'err', id: 'clearance', text: `<b>center distance</b> — the outer edges${A.type === 'pulley' ? ' (flanges)' : ''} would touch: they need ${need(U.fmt(reach, 1), ' mm')} between centers but there is ${U.fmt(d, 1)} mm. Set the extra center distance to ${need(U.fmt(extra, 1), ' mm')}`,
+      optB: { B: { meshOffset: extra } }, optA: null });
   },
 
   undercut(g, issues, need){

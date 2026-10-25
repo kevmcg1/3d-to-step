@@ -1,5 +1,5 @@
 "use strict";
-/* Gearworks — gear arithmetic shared by the compatibility checker,
+/* Gear Maker — gear arithmetic shared by the compatibility checker,
    the mounting maths and the stats readout. */
 (function(){
 const U = GW.U;
@@ -35,7 +35,7 @@ const Calc = GW.Calc = {
     return { r, ra: r + g.m * (g.ha + g.x), rf: r - g.m * (g.hf - g.x), rb: r * Math.cos(a) };
   },
 
-  /* operating pressure angle and centre distance for external / internal pairs */
+  /* operating pressure angle and center distance for external / internal pairs */
   centerDistance(A, B, internal){
     const m = A.m, a0 = U.rad(A.pa);
     let zs, xt;
@@ -47,6 +47,15 @@ const Calc = GW.Calc = {
     const invAw = 2 * Math.tan(a0) * xt / zs + U.inv(a0);
     const aw = U.invInv(Math.max(invAw, 0));
     return { a: m * zs / 2 * Math.cos(a0) / Math.cos(aw), aw, a0: m * zs / 2 };
+  },
+
+  /* the largest radius a gear reaches: tip circle, or the flange of a pulley */
+  outerReach(g){
+    if(g.type === 'pulley'){
+      const base = Calc.pitchR(g) - g.pitchLineDiff;
+      return g.flange !== 'none' ? (g.flangeD > 0 ? g.flangeD / 2 : base + 1.5 + g.grooveDepth * 0.6) : base;
+    }
+    return Calc.radii(g).ra;
   },
 
   /* a one-line table of numbers for the info panel */

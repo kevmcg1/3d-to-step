@@ -1,5 +1,5 @@
 "use strict";
-/* Gearworks — 2D tooth outlines.
+/* Gear Maker — 2D tooth outlines.
    Every function returns an array of {x,y} in counter-clockwise order
    (a closed loop; the last point is NOT repeated). */
 (function(){
@@ -59,7 +59,7 @@ GW.Prof = {
     const half = sP / (2 * r), invA = U.inv(a0);
     const fa = R => half + invA - U.inv(Math.acos(U.clamp(rb / Math.max(R, rb + 1e-9), -1, 1)));
     let Rs = Math.max(rf, rb);
-    // with few teeth and a steep pressure angle neighbouring teeth would overlap at the base circle:
+    // with few teeth and a steep pressure angle neighboring teeth would overlap at the base circle:
     // start the flank higher up, where each tooth is at most 92% of a pitch wide
     const maxHalf = 0.46 * step;
     if(fa(Rs) > maxHalf){
@@ -80,7 +80,7 @@ GW.Prof = {
     for(let i = 0; i < z; i++){
       const c = i * step, gc = c - step / 2;
       const floorEnd = gc + gapHalf * (1 - f);
-      // gap floor (from gap centre up to where the fillet starts)
+      // gap floor (from gap center up to where the fillet starts)
       const nFloor = Math.max(1, Math.round(gapHalf * (1 - f) / 0.2));
       for(let k = 0; k < nFloor; k++) out.push(pol(rf, gc + (floorEnd - gc) * k / nFloor));
       out.push(pol(rf, floorEnd));
@@ -103,7 +103,7 @@ GW.Prof = {
         out.push(pol(rf, c + fa(Rs)));
       }
     }
-    // de-duplicate coincident neighbours (flat floors share endpoints)
+    // de-duplicate coincident neighbors (flat floors share endpoints)
     const res = [];
     for(let i = 0; i < out.length; i++){
       const p = out[i], q = res[res.length - 1];
@@ -148,12 +148,12 @@ GW.Prof = {
     };
     const tE = solve(epi, -1, ra, Math.PI * rr / R * 0.98 * 1);
     const tH = solve(hypo, +1, rf, Math.PI * rr / R * 0.98 * 1);
-    // right flank samples, root -> tip  (angles measured from the tooth centre)
+    // right flank samples, root -> tip  (angles measured from the tooth center)
     const flank = [];
     for(let k = N; k >= 1; k--){ const p = hypo(tH * k / N); flank.push({ r: rad(p), a: delta + ang(p) }); }
     flank.push({ r: R, a: delta });
     for(let k = 1; k <= N; k++){ const p = epi(-tE * k / N); flank.push({ r: rad(p), a: delta + ang(p) }); }
-    // a flank may never cross the tooth's centre line, or the tooth folds over itself
+    // a flank may never cross the tooth's center line, or the tooth folds over itself
     const minA = 0.03 * step;
     flank.forEach(p => { if(p.a < minA) p.a = minA; });
     // and the root end must leave room for the gap
@@ -188,7 +188,7 @@ GW.Prof = {
     for(let i = 0; i < z; i++){
       const th = i * step;
       const C = pol(R, th);
-      // seat arc, facing the sprocket centre (direction th+PI); sweeping the angle
+      // seat arc, facing the sprocket center (direction th+PI); sweeping the angle
       // downwards walks the outline counter-clockwise around the sprocket
       for(let k = 0; k <= nA; k++){
         const a = th + Math.PI + sa - 2 * sa * k / nA;
@@ -321,7 +321,7 @@ GW.Prof = {
     return pts;
   },
 
-  /* Pitch-line distance between two circles of radius r1,r2 whose centres
+  /* Pitch-line distance between two circles of radius r1,r2 whose centers
      are d apart: the closed path used by chain and belt drives.
      Returns {len, at(s) -> {x,y,tx,ty}} in a frame where A is at the
      origin and B is at (d,0). */
