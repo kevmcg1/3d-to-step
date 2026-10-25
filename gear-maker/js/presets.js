@@ -20,7 +20,7 @@ const ang = (g, a) => G().set(g, 'meshAngle', a);
 GW.Presets = [
   { id: 'train', group: 'Basics', name: 'Gear train (3 spur gears)', note: 'The middle gear is an idler: it reverses nothing overall.', why: "Gear A turns gear B, and B turns gear C. Each time two gears touch, the direction flips, so A and C end up spinning the same way. The middle gear is just a go-between (an idler): it changes direction twice, so it changes nothing overall. Only the first and last gears decide the speed: 16 teeth driving 20 teeth means the last gear turns a bit slower.",
     build(x, y){
-      const a = add('spur', { name: 'Driver', z: 16, px: x, py: y, bore: 6 });
+      const a = add('spur', { name: 'Driver', z: 18, px: x, py: y, bore: 6 });
       const b = add('spur', { name: 'Idler', z: 32, bore: 8 });
       const c = add('spur', { name: 'Driven', z: 20, bore: 6 });
       meshAuto(b, a); ang(b, 20); meshAuto(c, b); ang(c, -35);
@@ -62,7 +62,7 @@ GW.Presets = [
   { id: 'planetary', group: 'Smooth & strong', name: 'Planetary set (carrier fixed)', note: 'Sun drives three planets inside a ring. 18 + 54 ÷ 3 teeth fit evenly.', why: "Picture the solar system: the sun gear in the middle drives three planet gears, and they all roll around inside a big ring gear with teeth on its inside. Here the ring is held still, so the planets are forced to walk around it. It packs a big speed change into a small, strong, balanced package, which is why automatic gearboxes use it.",
     build(x, y){
       const sun = add('spur', { name: 'Sun', z: 18, px: x, py: y, bore: 8, thick: 10, finish: 'brass' });
-      const ps = [0, 120, 240].map((ang_, i) => {
+      const ps = [0, 120, -120].map((ang_, i) => {
         const p = add('spur', { name: 'Planet ' + (i + 1), z: 18, bore: 5, thick: 10, finish: 'steel' });
         meshAuto(p, sun); ang(p, ang_); return p;
       });
@@ -95,7 +95,7 @@ GW.Presets = [
   { id: 'crown', group: 'Crossing shafts', name: 'Crown gear and pinion', note: 'A spur pinion drives teeth cut into the face of a crown gear.', why: "A crown gear has its teeth standing up from a flat face, like the points of a crown. An ordinary straight gear (the pinion) meshes with it from the side, so the shafts cross at a right angle. It is a simple way to turn a corner when the speed does not have to be exact.",
     build(x, y){
       const c = add('crown', { name: 'Crown', z: 40, px: x, py: y, thick: 6, faceW: 10, bore: 10 });
-      const p = add('spur', { name: 'Pinion', z: 14, thick: 12, bore: 5 });
+      const p = add('spur', { name: 'Pinion', z: 18, thick: 10, bore: 5 });
       meshAuto(p, c);
       return [c, p];
     } },
@@ -124,7 +124,7 @@ GW.Presets = [
     build(x, y){
       const a = add('cycloid', { name: 'Center wheel', z: 48, px: x, py: y, bore: 4, finish: 'brass', bodyStyle: 'spoked', spokes: 5, spokeW: 3 });
       const b = add('cycloid', { name: 'Third pinion', z: 12, bore: 3, finish: 'steel' });
-      const c = add('cycloid', { name: 'Third wheel', z: 45, bore: 4, finish: 'brass', bodyStyle: 'spoked', spokes: 5, spokeW: 3 });
+      const c = add('cycloid', { name: 'Third wheel', z: 45, bore: 3, finish: 'brass', bodyStyle: 'spoked', spokes: 5, spokeW: 3 });
       meshAuto(b, a); ang(b, 25);
       meshAuto(c, b, 'same shaft');
       return [a, b, c];

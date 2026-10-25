@@ -5,6 +5,8 @@ const U = GW.U, $ = U.el;
 
 GW.Scene.init($('stage'));
 GW.UI.init();
+GW.Blueprint.init();
+GW.Spot.init();
 $('openFile').onchange = e => { if(e.target.files[0]) GW.UI.loadProject(e.target.files[0]); e.target.value = ''; };
 
 /* the legend of mouse controls fades once you have used the view */
@@ -32,6 +34,9 @@ let last = performance.now(), seen = -1, readT = 0;
   if(GW.Gears.version !== seen){ seen = GW.Gears.version; GW.Drives.sync(); GW.UI.mark({ fb: 1, sync: 1 }); }
   GW.Drives.update();
   GW.UI.tick();
+  if(GW.Xform) GW.Xform.sync();
+  if(GW.Spot) GW.Spot.sync();
+  if(GW.Blueprint) GW.Blueprint.tick();
   const sel = GW.UI.sel(), hg = GW.Scene._helperGroup;
   if(sel && hg){ hg.position.copy(sel.mesh.position); hg.quaternion.copy(sel.rt.quat); }
   if(sel && sel.parentId && now - readT > 400){ readT = now; GW.UI.updateSpeedReadout(sel); }

@@ -186,23 +186,29 @@ const B = GW.Build = {
     const gap = U.clamp(g.vgap, 0, T - 1);
     const xf = (x, y, z) => { const a = k * Math.max(Math.abs(z) - gap / 2, 0), c = Math.cos(a), s = Math.sin(a); return [x * c - y * s, x * s + y * c]; };
     let parts;
+    // the flanks are twisted in several slices per half, enough that the helix reads as smooth and the V at the center is clean
+    const finer = n => Math.max(n, [5, 8, 12][B.draft ? 0 : B.quality]);
     if(gap < 0.01){
-      let steps = B.twistSteps(k * T / 2) * 2;
+      let steps = finer(B.twistSteps(k * T / 2)) * 2;
       parts = B.wheel(g, { pts: pr.pts, minR: pr.info.rf, z0: -T / 2, z1: T / 2, xf: Math.abs(k) > 1e-9 ? xf : null, steps });
     } else {
-      // two helical halves and a root-diameter core in the groove, then one hub through all of it
+      // two helical halves with a root-diameter core in the groove. Each half is built like a gear of its own, so the body style
+      // (webbed, spoked), lightening holes, bore and keyway all apply; the hub runs through both halves and the groove.
       const half = (T - gap) / 2;
-      const steps = B.twistSteps(k * half);
+      const steps = finer(B.twistSteps(k * half));
       const gp = Object.assign({}, g, { hubUp: 0, hubDown: 0 });
-      const base = { minR: pr.info.rf, xf, steps, styled: false };
+      const base = { minR: pr.info.rf, xf, steps };
       const up = B.wheel(gp, Object.assign({ pts: pr.pts, z0: gap / 2, z1: T / 2 }, base));
+      const gf = B._fit || g, styled = gf.bodyStyle && gf.bodyStyle !== 'solid';
       const dn = B.wheel(gp, Object.assign({ pts: pr.pts, z0: -T / 2, z1: -gap / 2 }, base));
       const core = B.wheel(gp, { pts: Prof.circle(pr.info.rf * 0.995, 96), minR: pr.info.rf * 0.99, z0: -gap / 2 - 0.2, z1: gap / 2 + 0.2, styled: false });
       parts = up.concat(dn, core);
-      const gf = B._fit || g, bp = B.borePts(gf), hr = B.hubRadius(gf), prof = Prof.circle(hr, B.q(Q.bore));
+      const bp = B.borePts(gf), hr = B.hubRadius(gf), prof = Prof.circle(hr, B.q(Q.bore));
       const hub = (za, zb) => Geo.extrude(prof, bp ? [bp] : [], zb - za, { z0: za });
       if(g.hubUp > 0) parts.push(hub(T / 2 - 0.6, T / 2 + g.hubUp));
       if(g.hubDown > 0) parts.push(hub(-T / 2 - g.hubDown, -T / 2 + 0.6));
+      // webbed / spoked halves each carry their own hub; this one ties them together across the groove (its ends sit inside the halves)
+      if(styled) parts.push(hub(-gap / 2 - Math.min(0.6, half * 0.3), gap / 2 + Math.min(0.6, half * 0.3)));
     }
     return { geo: parts, info: B.wheelInfo(g, pr.info, -T / 2, T / 2) };
   },

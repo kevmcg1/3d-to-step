@@ -40,7 +40,7 @@ Modeled on the Shop Tool Sim:
 - **Tolerances**: each gear has a process (ideal, CNC machined, resin print, filament print). The process opens the bore and keyway by its allowance and sets the smallest backlash that will run; *Set best-fit tolerances for everything* applies it to every gear on the table.
 - **When a gear stops fitting**: the strip offers *Change other gears to match* (changes the gears around it, leaves the edited one alone, then shows exactly what changed, with an Undo) and *Explain why* (what clashes, why it matters, and every option: change the other gear, change this one, un-mesh, or pick another partner type, each with a table of changes and an Apply button). Nothing changes until you press one.
 - **Honest status**: after the rules say a pair fits, the real shapes are tested for overlap while turning, and gears pulled apart with extra center distance are reported.
-- **Fast on small laptops**: light mode is chosen from the hardware (few cores, little memory, phone, software rendering) or switches itself on when frames are slow. It turns off antialiasing, draws at one pixel per pixel and 30 frames a second, and the view does not redraw at all while nothing moves.
+- **Fast on small laptops**: light mode is chosen from the hardware (few cores, little memory, phone, software rendering) or switches itself on when frames are slow. It turns off antialiasing and draws at one pixel per pixel, but never drops below the screen's full frame rate (60 frames a second on a 60 Hz screen), and the view does not redraw at all while nothing moves.
 
 ## Every setting is editable
 

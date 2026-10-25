@@ -72,6 +72,100 @@ const Preview = GW.Preview = {
     Preview.cache.set(k, e); return e;
   },
 
+  /* ---- thumbnails: a small turning model on every card, there without hovering ----
+     One shared renderer draws each card's model into the card's own 2D canvas. A card is built only once it
+     scrolls into view (one at a time, so the page never stalls), and only the cards on screen are redrawn. */
+  thumbs: new Set(), tq: [], tbusy: false, traf: 0, tlast: 0, tio: null,
+  tinit(){
+    if(Preview.tr) return;
+    const TW = 132, TH = 92;
+    Preview.TW = TW; Preview.TH = TH;
+    Preview.tr = new T.WebGLRenderer({ antialias: !GW.Perf.lite, alpha: true });
+    Preview.tr.setPixelRatio(1); Preview.tr.setSize(TW * 2, TH * 2, false);
+    const s = Preview.ts = new T.Scene();
+    s.environment = GW.Scene.scene.environment;
+    s.add(new T.HemisphereLight(0xe6ecf5, 0x2a2d35, 0.95));
+    const key = new T.DirectionalLight(0xffffff, 0.85); key.position.set(60, -80, 120);
+    const rim = new T.DirectionalLight(0x8fb3ff, 0.3); rim.position.set(-80, 60, 40);
+    s.add(key, rim);
+    const cam = Preview.tc = new T.OrthographicCamera(-1, 1, 1, -1, 10, 6000);
+    const th = -0.55, ph = 1.0, D = 2000;
+    cam.position.set(D * Math.sin(ph) * Math.sin(th), -D * Math.sin(ph) * Math.cos(th), D * Math.cos(ph));
+    cam.up.set(0, 0, 1); cam.lookAt(0, 0, 0);
+    Preview.th = new T.Group(); Preview.ti = new T.Group(); Preview.th.add(Preview.ti); s.add(Preview.th);
+    if('IntersectionObserver' in window) Preview.tio = new IntersectionObserver(list => {
+      list.forEach(x => { const t = x.target._thumb; if(t){ t.vis = x.isIntersecting; if(t.vis && !t.ready && !t.failed && !t.queued){ t.queued = true; Preview.tq.push(t); } } });
+      Preview.tpump(); Preview.tloop();
+    });
+  },
+  /* put a turning thumbnail in a canvas. o: { type } or { sample } */
+  thumb(cv, o){
+    Preview.tinit();
+    const t = { cv, ctx: cv.getContext('2d'), o, ph: Math.random() * 6.28, vis: !Preview.tio, ready: false, failed: false, queued: false };
+    cv._thumb = t; Preview.thumbs.add(t);
+    if(Preview.tio) Preview.tio.observe(cv); else { t.queued = true; Preview.tq.push(t); Preview.tpump(); }
+    return t;
+  },
+  tframe(e){
+    if(e.fr) return e.fr;
+    e.group.updateMatrixWorld(true);
+    const box = new T.Box3().setFromObject(e.group), c = box.getCenter(new T.Vector3());
+    e.fr = { c, hh: Math.max(box.getSize(new T.Vector3()).length() / 2, 5) * 1.12 };
+    return e.fr;
+  },
+  /* build one waiting card, then the next a moment later */
+  tpump(){
+    if(Preview.tbusy || !Preview.tq.length) return;
+    Preview.tbusy = true;
+    setTimeout(() => {
+      Preview.tbusy = false;
+      let t; while((t = Preview.tq.shift())){ if(t.cv.isConnected) break; t = null; }
+      if(t){
+        t.queued = false;
+        try { t.e = t.o.sample ? Preview.forSample(t.o.sample) : Preview.forType(t.o.type); t.ready = true; }
+        catch(err){ console.warn('thumbnail failed', err); t.failed = true; }
+        Preview.tdraw(t);
+      }
+      Preview.tpump(); Preview.tloop();
+    }, 40);
+  },
+  tdraw(t, now){
+    const cv = t.cv, ctx = t.ctx;
+    t.drawn = true;
+    ctx.clearRect(0, 0, cv.width, cv.height);
+    if(!t.ready || t.e.none){
+      if(t.ready){ ctx.fillStyle = '#8a8f97'; ctx.font = '600 22px Inter, sans-serif'; ctx.textAlign = 'center'; ctx.fillText('Large demo', cv.width / 2, cv.height / 2 + 8); }
+      return;
+    }
+    const f = Preview.tframe(t.e), cam = Preview.tc, ti = Preview.ti;
+    const ww = f.hh * Preview.TW / Preview.TH;
+    cam.left = -ww; cam.right = ww; cam.top = f.hh; cam.bottom = -f.hh; cam.updateProjectionMatrix();
+    ti.position.set(-f.c.x, -f.c.y, -f.c.z); ti.add(t.e.group);
+    Preview.th.rotation.z = t.ph + (now || 0) * 0.0007;
+    Preview.tr.render(Preview.ts, cam);
+    ti.remove(t.e.group);
+    ctx.drawImage(Preview.tr.domElement, 0, 0, cv.width, cv.height);
+  },
+  tloop(){
+    if(Preview.traf) return;
+    Preview.traf = requestAnimationFrame(now => {
+      Preview.traf = 0;
+      if(document.hidden){ Preview.tloop(); return; }
+      const still = GW.Perf.lite || (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
+      let live = false;
+      Preview.thumbs.forEach(t => {
+        if(!t.cv.isConnected){ Preview.thumbs.delete(t); if(Preview.tio) Preview.tio.unobserve(t.cv); return; }
+        if(t.vis && t.ready){ live = true; if(!still && now - Preview.tlast >= 15) t.dirty = true; else if(!t.drawn) t.dirty = true; }
+      });
+      if(now - Preview.tlast >= 15){
+        Preview.tlast = now;
+        Preview.thumbs.forEach(t => { if(t.dirty){ t.dirty = false; t.drawn = true; Preview.tdraw(t, now); } });
+      }
+      if(live && !still) Preview.tloop(); else if(live) { /* one still frame per card was drawn above */ Preview.thumbs.forEach(t => { if(t.vis && t.ready && !t.drawn) Preview.tloop(); }); }
+      if(Preview.tq.length || Preview.tbusy) Preview.tloop();
+    });
+  },
+
   /* ---- showing it ---- */
   show(o){
     Preview.init();

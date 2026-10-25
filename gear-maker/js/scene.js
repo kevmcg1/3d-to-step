@@ -8,7 +8,7 @@ GW.Scene = {
   init(container){
     const S = GW.Scene;
     S.container = container;
-    /* light mode for slow machines: no antialiasing, one pixel per pixel, 30 frames a second, and it only draws when
+    /* light mode for slow machines: no antialiasing and one pixel per pixel (it never lowers the frame rate), and it only draws when
        something changed. It is chosen from the hardware, and also switched on by itself if frames turn out slow. */
     const lite = S.lite = GW.Perf.lite;
     S.renderer = new T.WebGLRenderer({ antialias: !lite, alpha: true, preserveDrawingBuffer: false, powerPreference: lite ? 'low-power' : 'high-performance' });
@@ -46,6 +46,7 @@ GW.Scene = {
     S.scene.add(S.helpers);
     S.showHelpers = true;
 
+    if(GW.Xform) GW.Xform.init();       // before the camera controls, so a grab on the handle is seen first
     S.bindInput();
     S.resize();
     if(window.ResizeObserver) new ResizeObserver(() => S.resize()).observe(container);
@@ -111,8 +112,23 @@ GW.Scene = {
   /* the parts of the stage that always have something over them: the toolbar along the top, the view buttons down the right */
   insetTop(){ return GW.Scene.measure().top; },
   insetRight(){ return GW.Scene.measure().right; },
+  /* Mouse and wheel input is not applied in one jump: it is collected in S.inp and eased into the camera a little every frame
+     (about 90 % of it within a sixth of a second, whatever the frame rate), so orbiting, panning and zooming glide and stop softly. */
+  inp: { th: 0, ph: 0, px: 0, py: 0, zm: 0 }, _st: 0,
+  smooth(){
+    const S = GW.Scene, i = S.inp, o = S.orbit, now = performance.now(), dt = Math.min((now - (S._st || now)) / 1000, 0.1); S._st = now;
+    if(!(Math.abs(i.th) + Math.abs(i.ph) + Math.abs(i.px) + Math.abs(i.py) + Math.abs(i.zm) > 1e-5)){ i.th = i.ph = i.px = i.py = i.zm = 0; return; }
+    const f = 1 - Math.exp(-dt * 14);
+    const take = k => { const v = i[k] * f; i[k] -= v; return v; };
+    o.theta += take('th'); o.phi += take('ph');
+    const px = take('px'), py = take('py'); if(px || py) S.panBy(px, py);
+    o.dist *= Math.exp(take('zm'));
+    if(Math.abs(i.th) + Math.abs(i.ph) + Math.abs(i.px) + Math.abs(i.py) + Math.abs(i.zm) < 1e-5){ i.th = i.ph = i.px = i.py = i.zm = 0; }
+    S.wake(4);
+  },
   updateCam(){
     const S = GW.Scene, o = S.orbit, c = S.camera;
+    S.smooth();
     const inset = S.insetBottom(), { w, h } = S.size();
     o.dist = U.clamp(o.dist, 8, 3000);
     const hh = o.dist * S.HALF, ww = hh * w / h;
@@ -204,8 +220,10 @@ GW.Scene = {
       const up = new T.Vector3().crossVectors(right, dir).normalize();
       o.target.addScaledVector(right, -dx * f).addScaledVector(up, dy * f);
     };
+    S.panBy = pan;
     el.addEventListener('contextmenu', e => e.preventDefault());
     el.addEventListener('pointerdown', e => {
+      if(S.handleBusy()) return;                          // the move / rotate / scale handle has it
       stopFly();
       el.setPointerCapture(e.pointerId);
       ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -224,12 +242,12 @@ GW.Scene = {
       moved += Math.abs(dx) + Math.abs(dy);
       if(moved > 5) S.auto = null;                       // moved by hand: stop re-framing
       if(ptrs.size === 1){
-        if(panning) pan(dx, dy); else { o.theta -= dx * 0.006; o.phi -= dy * 0.006; }
+        if(panning){ S.inp.px += dx; S.inp.py += dy; } else { S.inp.th -= dx * 0.006; S.inp.ph -= dy * 0.006; }
       } else if(ptrs.size === 2){
         const [a, b] = [...ptrs.values()];
         const pinch = Math.hypot(a.x - b.x, a.y - b.y), mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
         if(lastPinch > 0) o.dist *= lastPinch / Math.max(pinch, 1);
-        if(lastMid) pan(mid.x - lastMid.x, mid.y - lastMid.y);
+        if(lastMid){ S.inp.px += mid.x - lastMid.x; S.inp.py += mid.y - lastMid.y; }
         lastPinch = pinch; lastMid = mid; moved += 20;
       }
     });
@@ -245,9 +263,12 @@ GW.Scene = {
     el.addEventListener('wheel', e => {
       S.auto = null;
       e.preventDefault(); stopFly();
-      o.dist *= Math.exp(Math.sign(e.deltaY) * Math.min(Math.abs(e.deltaY), 120) * 0.0011);
+      S.inp.zm += Math.sign(e.deltaY) * Math.min(Math.abs(e.deltaY), 120) * 0.0011;      // eased in by S.smooth, a notch at a time
     }, { passive: false });
   },
+
+  /* the pointer is on (or dragging) the transform handle: the camera must leave it alone */
+  handleBusy(){ const t = GW.Xform && GW.Xform.tc; return !!(t && t.object && (t.dragging || t.axis)); },
 
   hit(x, y){
     const S = GW.Scene, r = S.renderer.domElement.getBoundingClientRect();
@@ -303,7 +324,7 @@ GW.Scene = {
   changed(spinning){
     const S = GW.Scene, o = S.orbit, G = GW.Gears;
     const r = v => Math.round(v * 200);                                    // ignore changes too small to see
-    const sig = [r(o.theta), r(o.phi), r(o.dist), r(o.target.x), r(o.target.y), r(o.target.z), Math.round(S._inset || 0), S.size().w, S.size().h, G.version, GW.UI.selId, S.hoverId, S.gridOn, GW.UI._sv, r(S.grid.material.opacity), GW.Anim.list.length].join('|');
+    const sig = [r(o.theta), r(o.phi), r(o.dist), r(o.target.x), r(o.target.y), r(o.target.z), Math.round(S._inset || 0), S.size().w, S.size().h, G.version, GW.UI.selId, S.hoverId, GW.Xform ? GW.Xform.mode : '', GW.Spot ? Math.round(GW.Spot.k * 100) : 0, S.gridOn, GW.UI._sv, r(S.grid.material.opacity), GW.Anim.list.length].join('|');
     const diff = sig !== S._sig; S._sig = sig;
     if(diff) S._wake = Math.max(S._wake || 0, 30);                        // highlight fades and the like need a few more frames
     S._moved = diff || S._wake > 0;                                     // the picture itself changed (not just a turning gear)
@@ -312,8 +333,7 @@ GW.Scene = {
   render(now){
     const S = GW.Scene, G = GW.Gears;
     const spinning = G.spin && G.list.length > 0 && G.speed > 0;
-    // slow machines: 30 frames a second at most
-    if(S.lite && now != null && S._lastDraw != null && now - S._lastDraw < 30) return;
+    // every animation frame is drawn (60 a second on a 60 Hz screen); slow machines save work by drawing smaller, never by skipping frames
     S.updateCam();
     if(!S.changed(spinning)) return;                                      // nothing moved: leave the last picture on screen
     if(S._wake > 0) S._wake--;

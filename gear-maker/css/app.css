@@ -1,6 +1,7 @@
 /* Gear Maker — styles. Same visual language as the Shop Tool Sim: near-black stage, graphite sidebars,
    one blue accent, yellow brackets on the logo, ghost buttons, and motion on everything that changes. */
 @font-face{font-family:"Inter";font-style:normal;font-weight:100 900;font-display:swap;src:url(../fonts/inter-latin-wght-normal.woff2) format("woff2")}
+@font-face{font-family:"Roboto";font-style:italic;font-weight:700;font-display:swap;src:url(../fonts/roboto-latin-700-italic.woff2) format("woff2")}
 @font-face{font-family:"Bebas Neue";font-style:normal;font-weight:400;font-display:swap;src:url(../fonts/bebas-neue-latin-400-normal.woff2) format("woff2")}
 
 :root{
@@ -368,7 +369,7 @@ input[type=color]{width:46px;height:28px;border:1px solid var(--line-2);border-r
 .srow{position:relative;display:block;border-radius:10px;background:var(--raise);border:1px solid transparent;transition:border-color .2s,background-color .2s,transform .2s var(--ease)}
 .srow:hover{background:var(--raise-2);transform:translateX(2px)}
 .srow.on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,var(--raise))}
-.side .sbtn{flex:1;min-width:0;display:flex;flex-direction:column;align-items:flex-start;gap:1px;text-align:left;border:0;background:transparent;border-radius:10px 0 0 10px;padding:8px 10px}
+.side .sbtn{flex:1;min-width:0;display:flex;flex-direction:row;align-items:center;gap:10px;text-align:left;border:0;background:transparent;border-radius:10px 0 0 10px;padding:8px 10px}
 .side .sbtn:hover{background:transparent}
 .sn{font-weight:600;font-size:12.5px}.sd{color:var(--muted);font-size:11px;line-height:1.3;font-weight:400;white-space:normal}
 .side .sadd{flex:none;width:34px;border:0;border-left:1px solid var(--line);border-radius:0 10px 10px 0;font-size:17px;padding:0;color:var(--muted)}
@@ -510,3 +511,131 @@ input[type=color]{width:46px;height:28px;border:1px solid var(--line-2);border-r
 .tolbox{padding:4px 0 8px}.tolbox p{margin:0 0 10px;font-size:12px;line-height:1.5;color:#c3c7ce}
 .tolbox .wide{width:100%}
 .grp[data-g="Tolerance"]{--sc:#f0b955}
+
+/* ---------- thumbnails on the sample rows and the Add-a-gear cards (shown without hovering) ---------- */
+.stx{display:flex;flex-direction:column;align-items:flex-start;gap:1px;min-width:0}
+.sth,.cth{display:block;flex:none;border-radius:8px;background:radial-gradient(ellipse at 50% 40%,#2a2d33,#16181b 75%)}
+.sth{width:80px;height:56px}
+.cth{width:100%;height:auto;aspect-ratio:132/92;margin-bottom:6px}
+.srow.on .sth{box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 55%,transparent)}
+.card:hover .cth{box-shadow:0 0 0 1px var(--accent)}
+
+/* ---------- move / rotate / scale bar: floats over the selected gear ---------- */
+.xf{position:absolute;left:0;top:0;z-index:4;display:flex;flex-direction:column;align-items:center;gap:5px;opacity:0;visibility:hidden;pointer-events:none;transition:opacity .22s,visibility 0s .22s;will-change:transform}
+.xf.on{opacity:1;visibility:visible;pointer-events:auto;transition:opacity .22s,visibility 0s}
+.xf-btns{display:flex;gap:4px;padding:4px;background:rgba(19,20,22,.82);backdrop-filter:blur(10px);border:1px solid var(--line-2);border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.4)}
+.xf-b{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 10px;border-radius:8px;border:1px solid transparent;background:transparent;color:var(--ink);font-weight:600;font-size:12px;cursor:pointer;transition:background-color .2s,border-color .2s,color .2s,transform .15s var(--ease)}
+.xf-b svg{width:15px;height:15px}
+.xf-b:hover,.xf-b:focus-visible{background:rgba(255,255,255,.07);outline:none}
+.xf-b:active{transform:scale(.95)}
+.xf-b[aria-pressed="true"]{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 24%,transparent);color:#fff}
+.xf-off{padding:0 8px;color:var(--muted)}
+.xf:not(.active) .xf-off{display:none}
+.xf-read{max-width:300px;padding:3px 9px;border-radius:999px;background:rgba(0,0,0,.6);font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.xf.dragging .xf-read{color:#fff}
+@media (max-width:640px){.xf-b span{display:none}.xf-b{padding:0 9px}}
+
+/* ---------- blueprint: covers the 3D view, the sidebars stay usable so every edit redraws it live ---------- */
+.bp{position:absolute;inset:0;z-index:20;display:flex;flex-direction:column;background:var(--bg);opacity:0;visibility:hidden;transform:translateY(10px);transition:opacity .25s,transform .35s var(--ease),visibility 0s .25s}
+.bp.on{opacity:1;visibility:visible;transform:none;transition:opacity .25s,transform .35s var(--ease),visibility 0s}
+.bp[hidden]{display:none}
+.bp-head{flex:none;display:flex;flex-wrap:wrap;align-items:center;gap:10px 18px;padding:10px 14px;background:var(--bar);border-bottom:1px solid var(--line)}
+.bp-title b{display:block;font-family:"Bebas Neue","Inter",sans-serif;font-size:20px;letter-spacing:.08em;font-weight:400}
+.bp-title small{display:block;color:var(--muted);font-size:11px}
+.bp-origin{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
+.bp-origin select,.bp-origin input[type=number]{height:30px;background:var(--raise);border:1px solid var(--line-2);border-radius:8px;color:var(--ink);padding:0 8px;font-size:12.5px}
+.bp-origin input[type=number]{width:82px}
+.bp-origin .bo-g,.bp-origin .bo-c{display:flex;align-items:center;gap:8px}
+.bp-origin .bo-g[hidden],.bp-origin .bo-c[hidden]{display:none}
+.bp-origin .bo-chk{margin:0;font-size:12px}
+.bp-actions{margin-left:auto;display:flex;gap:8px;align-items:center}
+.bp-body{flex:1;min-height:0;overflow:auto;padding:14px 16px 40px}
+.bp-empty{display:grid;place-items:center;height:60%;text-align:center;color:var(--muted)}.bp-empty b{display:block;color:var(--ink);margin-bottom:4px}
+.bp-sec{margin-bottom:22px}
+.bp-sh{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 14px;margin:0 0 8px}
+.bp-sh h3{margin:0;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);font-weight:700}
+.bp-sh small{color:var(--dim);font-size:11.5px}
+.bp-tabs{display:flex;gap:4px;margin-left:auto}
+.bp-tab{height:26px;padding:0 12px;border-radius:999px;border:1px solid #3d4147;background:transparent;color:var(--muted);font-weight:600;font-size:12px;cursor:pointer;transition:all .2s}
+.bp-tab[aria-pressed="true"]{border-color:var(--accent);color:#fff;background:color-mix(in srgb,var(--accent) 22%,transparent)}
+.bp-fig{border:1px solid var(--line-2);border-radius:12px;overflow:hidden;background:#0f1114}
+.bp-fig svg{display:block;width:100%;height:auto}
+.bp-tw{overflow-x:auto;border:1px solid var(--line-2);border-radius:12px}
+.bp-t{width:100%;border-collapse:collapse;font-size:12.5px}
+.bp-t th,.bp-t td{padding:7px 10px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top;white-space:nowrap}
+.bp-t thead th{font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);background:var(--panel);position:sticky;top:0}
+.bp-t tbody th{font-weight:600}.bp-t th small{display:block;color:var(--dim);font-weight:400;font-size:11px}
+.bp-t td b{display:block;font-weight:600;color:#fff}.bp-t td i{display:block;font-style:normal;color:var(--dim);font-size:11px}
+.bp-t td.mono,.bp-t td.sm{font-size:11.5px;color:var(--muted)}.bp-t td.mono{font-family:ui-monospace,Consolas,monospace}
+.bp-t tr[data-id]{cursor:pointer}.bp-t tr.sel{background:color-mix(in srgb,var(--accent) 14%,transparent)}.bp-t tr.lnk th{color:var(--accent)}
+.bp-t tbody tr:hover{background:rgba(255,255,255,.03)}
+.bp-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,640px),1fr));gap:14px}
+.bp-card{border:1px solid var(--line-2);border-radius:14px;background:var(--panel);overflow:hidden;transition:border-color .2s}
+.bp-card.sel{border-color:var(--accent)}
+.bp-card .bp-fig{border:0;border-radius:0;border-bottom:1px solid var(--line-2)}
+.bp-kv th{width:46%;color:var(--muted);font-weight:500;white-space:normal}
+.bp-kv td{white-space:normal}.bp-kv td b,.bp-kv td i{display:inline;margin-right:8px}
+.bp-only{margin:0 0 0 auto;font-size:12px}
+@media (max-width:640px){.bp-actions .pill span{display:none}.bp-title small{display:none}}
+#bpBtn[aria-pressed="true"]{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,transparent)}
+#bpPrintHost{display:none}
+@media print{
+  body.printing-bp{background:#fff;overflow:visible;display:block}
+  body.printing-bp>*:not(#bpPrintHost){display:none!important}
+  body.printing-bp #bpPrintHost{display:block}
+  body.printing-bp .pp{page-break-after:always;padding:8mm}
+  body.printing-bp .pp svg{width:100%;height:auto}
+}
+
+.bp-fig svg,#bpPrintHost svg{stroke:none;stroke-width:1}
+
+/* ---------- "Which gear is this?": the backdrop dims (under the 3D canvas), a tag points at the outlined gear, then it all eases back ---------- */
+.spot-dim{position:absolute;inset:0;background:#030405;opacity:0;pointer-events:none}
+.spot-tag{position:absolute;left:0;top:0;z-index:5;width:240px;padding:10px 14px 12px;border-radius:12px;background:var(--raise);border:1px solid var(--accent);box-shadow:0 14px 40px rgba(0,0,0,.6);opacity:0;visibility:hidden;pointer-events:none;overflow:visible;transition:opacity .25s,visibility 0s .25s;will-change:transform}
+.spot-tag.on{opacity:1;visibility:visible;transition:opacity .25s,visibility 0s}
+.spot-tag small{display:block;font-size:10.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--accent)}
+.spot-tag b{display:block;font-size:17px;margin:3px 0 1px}
+.spot-tag span{display:block;font-size:12px;color:var(--muted);line-height:1.35}
+.spot-bar{position:absolute;left:0;right:0;bottom:0;height:3px;border-radius:0 0 12px 12px;background:var(--accent);transform-origin:left;animation:spotbar var(--hold,3s) linear forwards}
+@keyframes spotbar{from{transform:scaleX(1)}to{transform:scaleX(0)}}
+.spot-arrow{position:absolute;left:var(--ax,50%);bottom:-8px;width:14px;height:14px;margin-left:-7px;background:var(--raise);border-right:1px solid var(--accent);border-bottom:1px solid var(--accent);transform:rotate(45deg)}
+.spot-tag.below .spot-arrow{bottom:auto;top:-8px;transform:rotate(225deg)}
+.spotting .glabels{opacity:.15;transition:opacity .3s}
+.xf-who{color:var(--accent)}
+.xf-who[hidden]{display:none}
+@media (prefers-reduced-motion:reduce){.spot-bar{animation:none}}
+
+/* ---------- left sidebar: every category is a band in its own color, titled like the Shop Tool Sim's sections ---------- */
+.side.left section h2,.scat .sgrp{position:relative;display:flex;align-items:center;gap:8px;margin:0 0 14px;padding:0 0 9px;font-family:"Roboto","Inter",system-ui,sans-serif;font-style:italic;font-weight:700;font-size:13px;letter-spacing:.1em;text-transform:uppercase;line-height:1.2;color:color-mix(in srgb,var(--sc,#8a8f97) 55%,#fff)}
+.side.left section h2::after,.scat .sgrp::after{content:"";position:absolute;left:0;right:0;bottom:0;height:2px;border-radius:2px;background:linear-gradient(90deg,var(--sc,#8a8f97) 0%,color-mix(in srgb,var(--sc,#8a8f97) 45%,#5b93ea) 42%,transparent 100%)}
+.scat{--sc:#8a8f97;margin:0 -16px;padding:14px 16px 12px;border-top:1px solid var(--line);background:linear-gradient(90deg,color-mix(in srgb,var(--sc) 22%,transparent) 0%,color-mix(in srgb,var(--sc) 8%,transparent) 45%,transparent 100%);box-shadow:inset 3px 0 0 color-mix(in srgb,var(--sc) 75%,transparent)}
+.scat:first-of-type{margin-top:6px}
+.scat .sgrp{margin:0 0 10px;font-size:12px}
+.scat .srow+.srow{margin-top:6px}
+.side.left section .count{font-family:"Inter",sans-serif;font-style:normal;letter-spacing:0}
+#secSamples{padding-bottom:0}
+
+/* ---------- footer, the same as the other pages ---------- */
+.foot{flex:none;display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:6px 18px;padding:8px 14px;background:var(--bar);border-top:1px solid var(--line);font-size:12px;color:var(--muted);text-align:center}
+.foot a{color:var(--ink);text-decoration:none;border-bottom:1px solid transparent;transition:color .2s,border-color .2s}
+.foot a:hover,.foot a:focus-visible{color:var(--accent);border-bottom-color:currentColor;outline:none}
+@media (max-width:640px){.foot{padding:8px 10px}}
+@media print{.foot{display:none}}
+
+/* ---------- properties: search ---------- */
+.psearch{display:flex;align-items:center;gap:8px;margin-top:10px;height:34px;padding:0 10px;background:var(--raise);border:1px solid var(--line-2);border-radius:9px;transition:border-color .2s,box-shadow .2s,background-color .2s}
+.psearch:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 22%,transparent)}
+.psearch>svg{width:15px;height:15px;color:var(--muted);flex:none}
+.psearch input{flex:1;min-width:0;height:100%;border:0;background:transparent;outline:none;color:var(--ink);font-size:13px;padding:0;-webkit-appearance:none;appearance:none}
+.psearch input::-webkit-search-cancel-button{display:none}
+.psx{flex:none;width:22px;height:22px;padding:0;display:grid;place-items:center;border:0;border-radius:6px;background:transparent;color:var(--muted);cursor:pointer;transition:background-color .2s,color .2s}
+.psx[hidden]{display:none}.psx:hover{background:rgba(255,255,255,.08);color:#fff}.psx svg{width:12px;height:12px}
+#props.searching .grp .gwrap{grid-template-rows:1fr}
+#props.searching .grp .gwrap>.gbody{padding:0 16px 12px;opacity:1}
+#props.searching .grp>button.gh svg{transform:rotate(90deg)}
+#props .grp.nomatch,#props .prow.nomatch{display:none}
+#props.searching #adj{display:none}
+#psNone{padding:30px 20px}
+/* sliders: the thumb follows the pointer exactly (no easing on it), the track fill never animates */
+input[type=range]{touch-action:pan-y;-webkit-tap-highlight-color:transparent}
+input[type=range]::-webkit-slider-thumb{transition:transform .15s var(--spring),box-shadow .2s;will-change:transform}

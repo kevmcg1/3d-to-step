@@ -19,7 +19,8 @@ const ICON = {
   down: '<svg viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>',
   check: '<svg viewBox="0 0 24 24"><path d="M5 13l4 4 10-10"/></svg>',
   plus: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
-  x: '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>'
+  x: '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+  search: '<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>'
 };
 
 /* settings that change which other controls exist, so the panel is rebuilt after them */
@@ -189,16 +190,17 @@ const UI = GW.UI = {
   /* ================================================================== left: samples */
   initLeft(){
     // samples: a list of cards; clicking one loads it, the + beside it adds it next to what is there
-    const sl = $('sampleList'), groups = {};
+    const sl = $('sampleList'), groups = {}, COLS = ['#5b93ea', '#5fcf8a', '#a78bfa', '#f472b6', '#fb923c', '#2dd4bf', '#94a3b8', '#e8b547']; let ci = 0;
     GW.Presets.forEach(p => { (groups[p.group] = groups[p.group] || []).push(p); });
     $('sampleCount').textContent = GW.Presets.length;
     Object.keys(groups).forEach(gr => {
-      sl.appendChild(make('h3', 'sgrp', gr));
+      const cat = make('div', 'scat'); cat.style.setProperty('--sc', COLS[ci++ % COLS.length]); cat.appendChild(make('h3', 'sgrp', gr)); sl.appendChild(cat);
       groups[gr].forEach(p => {
         const row = make('div', 'srow'); row.dataset.id = p.id;
         const line = make('div', 'sline');
         const b = make('button', 'sbtn'); b.type = 'button'; b.dataset.id = p.id;
-        b.innerHTML = `<span class="sn">${esc(p.name)}</span><span class="sd">${esc(p.note)}</span>`;
+        b.innerHTML = `<canvas class="sth" width="264" height="184" aria-hidden="true"></canvas><span class="stx"><span class="sn">${esc(p.name)}</span><span class="sd">${esc(p.note)}</span></span>`;
+        GW.Preview.thumb(b.querySelector('canvas'), { sample: p });
         b.onclick = () => { GW.Preview.hide(); UI.markSample(p.id); UI.loadSample(p, true); };
         const info = make('button', 'sinfo'); info.type = 'button'; info.dataset.id = p.id; info.textContent = '?';
         info.setAttribute('aria-label', 'Explain ' + p.name); info.setAttribute('aria-expanded', 'false'); info.dataset.tip = 'What is happening?\nA plain-English explanation.';
@@ -210,7 +212,7 @@ const UI = GW.UI = {
         const prev = on => () => { if(on) GW.Preview.show({ sample: p, anchor: row, side: 'right' }); else GW.Preview.hide(); };
         row.addEventListener('pointerenter', prev(true)); row.addEventListener('pointerleave', prev(false));
         b.addEventListener('focus', prev(true)); b.addEventListener('blur', prev(false));
-        line.append(b, info, add); row.append(line, why); sl.appendChild(row);
+        line.append(b, info, add); row.append(line, why); cat.appendChild(row);
       });
     });
 
@@ -349,6 +351,7 @@ const UI = GW.UI = {
       host.appendChild(grp);
     });
     UI.syncProps();
+    if(UI.psq) UI.applySearch();
     $('right').scrollTop = keepScroll;
   },
 
@@ -369,7 +372,40 @@ const UI = GW.UI = {
     h.appendChild(sub);
     // the gear type is a setting like any other: change it and the controls below follow
     const tc = UI.control(g, 'type'); UI.ctl.type = tc; tc.row.classList.add('ph-type'); h.appendChild(tc.row);
+    // search every setting of this gear by name or by what it does
+    const sb = make('label', 'psearch', ICON.search + '<input type="search" placeholder="Search settings…" aria-label="Search this gear\'s settings" autocomplete="off" spellcheck="false"><button type="button" class="psx" aria-label="Clear the search" hidden>' + ICON.x + '</button>');
+    const si = sb.querySelector('input'), sx = sb.querySelector('.psx');
+    si.value = UI.psq || '';
+    si.oninput = () => { UI.psq = si.value; sx.hidden = !si.value; UI.applySearch(); };
+    si.onkeydown = e => { if(e.key === 'Escape' && si.value){ e.stopPropagation(); si.value = ''; si.oninput(); } };
+    sx.onclick = () => { si.value = ''; si.oninput(); si.focus(); };
+    sx.hidden = !si.value;
+    h.appendChild(sb);
     return h;
+  },
+
+  /* show only the settings that match what was typed (every word must appear in the name, the hint or the group); groups with nothing left hide */
+  applySearch(){
+    const q = (UI.psq || '').toLowerCase().split(/\s+/).filter(Boolean), host = $('props');
+    if(!host) return;
+    const rows = host.querySelectorAll('.grp .prow');
+    host.classList.toggle('searching', q.length > 0);
+    host.querySelectorAll('.grp').forEach(grp => {
+      let hits = 0;
+      const gname = (grp.dataset.g || '').toLowerCase();
+      grp.querySelectorAll('.prow').forEach(r => {
+        const hay = (r.dataset.s || (r.dataset.s = (r.textContent + ' ' + (r.querySelector('label') ? (r.querySelector('label').getAttribute('data-tip') || '') : '') + ' ' + gname).toLowerCase()));
+        const ok = !q.length || q.every(w => hay.indexOf(w) >= 0);
+        r.classList.toggle('nomatch', !ok); if(ok) hits++;
+      });
+      const gok = !q.length || hits > 0 || q.every(w => gname.indexOf(w) >= 0);
+      grp.classList.toggle('nomatch', !gok);
+      if(q.length && gname && q.every(w => gname.indexOf(w) >= 0)) grp.querySelectorAll('.prow').forEach(r => r.classList.remove('nomatch'));
+    });
+    let none = $('psNone');
+    const any = !q.length || [...host.querySelectorAll('.grp:not(.nomatch)')].length;
+    if(!any){ if(!none){ none = make('div', 'none'); none.id = 'psNone'; host.appendChild(none); } none.innerHTML = '<b>No setting matches “' + esc(UI.psq) + '”</b>Try a shorter word, like “bore”, “teeth” or “angle”.'; }
+    else if(none) none.remove();
   },
 
   group(name, count){
@@ -388,7 +424,7 @@ const UI = GW.UI = {
     const row = make('div', 'prow'), pin = make('div', 'pin'), pr = make('div', 'pr');
     row.appendChild(pin); pin.appendChild(pr);
     const lab = make('label', null, label); if(hint) lab.setAttribute('data-tip', label + '\n' + hint); pr.appendChild(lab);
-    const apply = (v, drag) => UI.queue(g, key, v, drag);
+    const apply = (v, drag) => UI.queue(g, key, typeof v === 'number' ? +v.toFixed(4) : v, drag);
     const ctl = { key, row, label: lab, sync(){}, visible(){ return UI.visibleIf(g, key); } };
 
     if(kind === 'text'){
@@ -418,14 +454,14 @@ const UI = GW.UI = {
       const c = make('input'); c.type = 'color'; c.oninput = () => apply(c.value);
       pr.appendChild(c); ctl.sync = () => { if(document.activeElement !== c) c.value = g.color; };
     } else {
-      const r = make('input'); r.type = 'range'; r.step = step;
-      const u = make('div', 'u'); const n = make('input', 'num'); n.type = 'number'; n.step = 'any'; n.inputMode = 'decimal';
+      const r = make('input'); r.type = 'range'; r.step = kind === 'int' ? 1 : 'any';           // smooth: no notches between positions
+      const u = make('div', 'u'); const n = make('input', 'num'); n.type = 'number'; n.inputMode = 'decimal';
       const Un = GW.Units, isLen0 = unit === 'mm';
       const lenNow = () => isLen0 || (key === 'rpm' && g.type === 'rack');                    // a rack's "speed" is a travel speed in mm/s
       const un = make('span', 'un', unit || ''), mmv = make('span', 'mmv'); u.appendChild(n); u.appendChild(un); u.appendChild(mmv);
       const toD = v => lenNow() ? Un.d(v) : v, fromD = v => lenNow() ? Un.fromD(v) : v;
-      const fmtD = v => lenNow() ? Un.fmtD(v) : U.fmt(v, 4);
-      const dStep = () => lenNow() && Un.inch ? Math.max(0.001, +((+step || 1) / 25.4).toPrecision(1)) : (+step || 1);
+      const fmtD = v => lenNow() ? (Un.inch ? U.fmt(Un.d(v), 4) : U.fmt(v, 3)) : U.fmt(v, 4);
+      const dStep = () => kind === 'int' ? 1 : lenNow() && !Un.inch ? 0.01 : 0.001;               // arrows: .001 in (0.01 mm), .001 for the rest; Shift = ten times
       const showAlt = v => { mmv.textContent = lenNow() ? '(' + Un.other(v) + (key === 'rpm' ? '/s' : '') + ')' : ''; };
       pr.appendChild(r); pr.appendChild(u);
       const fill = () => r.style.setProperty('--fill', U.clamp((r.value - r.min) / (r.max - r.min), 0, 1) * 100 + '%');
@@ -434,10 +470,11 @@ const UI = GW.UI = {
       r.addEventListener('change', () => { UI.flush(); UI.endDrag(); });
       n.oninput = () => { if(n.value === '' || isNaN(+n.value)) return; const mm = fromD(+n.value); r.value = mm; showAlt(mm); fill(); apply(mm, false); };
       n.onchange = () => { UI.flush(); UI.syncProps(); };
+      n.step = dStep();
       n.onkeydown = e => { if(e.key === 'Enter') n.blur(); if(e.key === 'ArrowUp' || e.key === 'ArrowDown'){ e.preventDefault(); const s = dStep(); n.value = U.fmt(+n.value + (e.key === 'ArrowUp' ? s : -s) * (e.shiftKey ? 10 : 1), 4); n.oninput(); } };
       ctl.sync = () => {
         const [lo, hi] = Types.range(g.type, key);
-        r.min = lo; r.max = hi;
+        r.min = lo; r.max = hi; n.step = dStep();
         const rackSpeed = g.type === 'rack' && key === 'rpm';
         if(rackSpeed) lab.textContent = 'Travel speed'; else if(key === 'rpm'){ un.textContent = 'rpm'; lab.textContent = label; }
         const v = g[key];
@@ -496,7 +533,15 @@ const UI = GW.UI = {
   queue(g, key, val, drag){
     UI._pending.set(g.id + ':' + key, { g, key, val });
     if(drag) UI._touched.add(g.id);
-    if(!UI._raf) UI._raf = requestAnimationFrame(() => UI.flush());
+    if(!UI._raf) UI._raf = requestAnimationFrame(UI.tickFlush);
+  },
+  /* while a slider is dragged, rebuilds wait for the last one to finish (and a beat more), so the thumb and the pointer never stall behind the geometry */
+  _cost: 0, _lf: 0,
+  tickFlush(){
+    UI._raf = 0;
+    if(UI.dragging && performance.now() - UI._lf < UI._cost){ UI._raf = requestAnimationFrame(UI.tickFlush); return; }
+    const t = performance.now(); UI.flush();
+    const dt = performance.now() - t; UI._cost = Math.min(120, UI._cost * 0.6 + dt * 0.5); UI._lf = performance.now();
   },
   flush(){
     UI._raf = 0;
@@ -1008,12 +1053,13 @@ const UI = GW.UI = {
     let html = `<div class="mhead"><h3>Add a gear</h3><button class="iconbtn" id="mClose" aria-label="Close">${ICON.x}</button></div><div class="mbody">`, i = 0;
     Object.keys(groups).forEach(gr => {
       html += `<h4>${gr}</h4><div class="cards">`;
-      groups[gr].forEach(t => { html += `<button class="card" data-t="${t}" style="animation-delay:${i++ * 25}ms"><b>${TYPES[t].label}</b><span>${TYPES[t].desc}</span></button>`; });
+      groups[gr].forEach(t => { html += `<button class="card" data-t="${t}" style="animation-delay:${i++ * 25}ms"><canvas class="cth" width="264" height="184" aria-hidden="true"></canvas><b>${TYPES[t].label}</b><span>${TYPES[t].desc}</span></button>`; });
       html += '</div>';
     });
     UI.openModal(html + '</div>');
     $('mClose').onclick = UI.closeModal;
     document.querySelectorAll('#modal .card').forEach(c => {
+      GW.Preview.thumb(c.querySelector('canvas'), { type: c.dataset.t });
       const on = () => GW.Preview.show({ type: c.dataset.t, anchor: c, side: 'right' }), off = () => GW.Preview.hide();
       c.addEventListener('pointerenter', on); c.addEventListener('pointerleave', off); c.addEventListener('focus', on); c.addEventListener('blur', off);
     });
