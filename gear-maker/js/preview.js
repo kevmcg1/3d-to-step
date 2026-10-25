@@ -29,20 +29,21 @@ const Preview = GW.Preview = {
     const key = new T.DirectionalLight(0xffffff, 0.85); key.position.set(60, -80, 120);
     const rim = new T.DirectionalLight(0x8fb3ff, 0.3); rim.position.set(-80, 60, 40);
     Preview.scene.add(key, rim);
-    Preview.cam = new T.PerspectiveCamera(36, W / H, 0.5, 4000);
-    Preview.holder = new T.Group(); Preview.scene.add(Preview.holder);
+    Preview.cam = new T.OrthographicCamera(-1, 1, 1, -1, 10, 6000);       // orthographic, like the main view
+    Preview.holder = new T.Group(); Preview.scene.add(Preview.holder);   // turns about the vertical axis through the build's center
+    Preview.inner = new T.Group(); Preview.holder.add(Preview.inner);    // carries the model, shifted so its center sits on that axis
     Preview.cap = { b: el.querySelector('.pv-cap b'), s: el.querySelector('.pv-cap small') };
   },
 
   /* ---- building what to show ---- */
-  solid(g){ const f = GW.Types.FINISH[g.finish] || GW.Types.FINISH.brass; return new T.MeshStandardMaterial({ color: g.color || f.color, metalness: g.metal, roughness: g.rough, envMapIntensity: 1 }); },
+  solid(g, geo){ const f = GW.Types.FINISH[g.finish] || GW.Types.FINISH.brass; const m = new T.MeshStandardMaterial({ color: g.color || f.color, metalness: g.metal, roughness: g.rough, envMapIntensity: 1 }); if(GW.Tex && geo) GW.Tex.apply(g, geo, m); return m; },
 
   forType(type){
     const k = 'type:' + type; if(Preview.cache.has(k)) return Preview.cache.get(k);
     const g = GW.Types.defaults(type); g.name = GW.Types.TYPES[type].label;
     const prev = GW.Build.quality, prevD = GW.Build.draft; GW.Build.quality = Math.max(prev, 1); GW.Build.draft = false;
     let r; try { r = GW.Build.build(g); } finally { GW.Build.quality = prev; GW.Build.draft = prevD; }
-    const group = new T.Group(); group.add(new T.Mesh(r.geo, Preview.solid(g)));
+    const group = new T.Group(); group.add(new T.Mesh(r.geo, Preview.solid(g, r.geo)));
     const e = { group, caption: [GW.Types.TYPES[type].label, GW.Types.TYPES[type].desc] };
     Preview.cache.set(k, e); return e;
   },
@@ -59,7 +60,7 @@ const Preview = GW.Preview = {
       G.dirty = true; GW.Layout.solveAll(); GW.Layout.update(0);
       G.list.forEach(g => {
         g.mesh.updateMatrixWorld(true);
-        const m = new T.Mesh(g.mesh.geometry, Preview.solid(g));
+        const m = new T.Mesh(g.mesh.geometry, Preview.solid(g, g.mesh.geometry));
         m.position.copy(g.mesh.position); m.quaternion.copy(g.mesh.quaternion); m.scale.copy(g.mesh.scale);
         e.group.add(m);
       });
@@ -80,14 +81,19 @@ const Preview = GW.Preview = {
     Preview.cap.b.textContent = e.caption[0]; Preview.cap.s.textContent = e.caption[1];
     if(Preview.shown !== id){
       Preview.shown = id;
-      while(Preview.holder.children.length) Preview.holder.remove(Preview.holder.children[0]);
+      while(Preview.inner.children.length) Preview.inner.remove(Preview.inner.children[0]);
       if(!e.none){
-        Preview.holder.add(e.group);
-        const box = new T.Box3().setFromObject(e.group), c = box.getCenter(new T.Vector3()), r = Math.max(box.getSize(new T.Vector3()).length() / 2, 5);
-        Preview.holder.position.set(-c.x, -c.y, -c.z); Preview.pivot = c; Preview.radius = r;
-        Preview.spin = 0;
-        const d = r / Math.sin(U.rad(Preview.cam.fov / 2)) * 1.08;
-        Preview.cam.position.set(0, -d * Math.cos(0.5), d * Math.sin(0.5) * 0.9 + d * 0.3); Preview.cam.up.set(0, 0, 1); Preview.cam.lookAt(0, 0, 0);
+        Preview.inner.position.set(0, 0, 0); Preview.holder.rotation.set(0, 0, 0); Preview.holder.updateMatrixWorld(true);
+        Preview.inner.add(e.group);
+        const box = new T.Box3().setFromObject(e.group), c = box.getCenter(new T.Vector3());
+        // turn about the middle of the whole build, not about one gear or the world origin
+        Preview.inner.position.set(-c.x, -c.y, -c.z);
+        Preview.holder.rotation.set(0, 0, 0);
+        const ext = box.getSize(new T.Vector3()).length() / 2, hh = Math.max(ext, 5) * 1.12, ww = hh * W / H;
+        Preview.cam.left = -ww; Preview.cam.right = ww; Preview.cam.top = hh; Preview.cam.bottom = -hh; Preview.cam.updateProjectionMatrix();
+        const th = -0.55, ph = 1.0, D = 2000;
+        Preview.cam.position.set(D * Math.sin(ph) * Math.sin(th), -D * Math.sin(ph) * Math.cos(th), D * Math.cos(ph));
+        Preview.cam.up.set(0, 0, 1); Preview.cam.lookAt(0, 0, 0);
       }
       Preview.cv.style.opacity = e.none ? 0 : 1;
       Preview.el.classList.remove('swap'); void Preview.el.offsetWidth; Preview.el.classList.add('swap');
@@ -114,9 +120,6 @@ const Preview = GW.Preview = {
       Preview.raf = 0;
       if(!Preview.el.classList.contains('show')) return;
       Preview.holder.rotation.z += 0.012;
-      // turn about the model's own center: the holder is offset, so rotate the group about it
-      const c = Preview.pivot;
-      if(c){ const a = Preview.holder.rotation.z; Preview.holder.position.set(-(c.x * Math.cos(a) - c.y * Math.sin(a)), -(c.x * Math.sin(a) + c.y * Math.cos(a)), -c.z); }
       Preview.r.render(Preview.scene, Preview.cam);
       Preview.loop();
     });

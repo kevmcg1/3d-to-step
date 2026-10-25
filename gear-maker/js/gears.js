@@ -6,9 +6,9 @@ const Z = new T.Vector3(0, 0, 1);
 const qz = new T.Quaternion();
 
 /* settings that never change the gear's own shape */
-const SOFT = new Set(['name', 'px', 'py', 'pz', 'rx', 'ry', 'rz', 'rpm', 'finish', 'color', 'metal', 'rough', 'opacity', 'wire', 'visible',
+const SOFT = new Set(['name', 'px', 'py', 'pz', 'rx', 'ry', 'rz', 'rpm', 'finish', 'surface', 'color', 'metal', 'rough', 'opacity', 'wire', 'visible',
                       'parentId', 'linkKind', 'meshAngle', 'shaftAngle', 'meshOffset', 'shaftOffset', 'shaftPhase']);
-const STYLE = new Set(['finish', 'color', 'metal', 'rough', 'opacity', 'wire', 'visible']);
+const STYLE = new Set(['finish', 'surface', 'color', 'metal', 'rough', 'opacity', 'wire', 'visible']);
 
 const Gears = GW.Gears = {
   list: [], order: [], nextId: 1, dirty: true, speed: 1, spin: true,
@@ -56,6 +56,7 @@ const Gears = GW.Gears = {
     g.mesh.geometry.dispose();
     g.mesh.geometry = r.geo;
     g.info = r.info;
+    if(GW.Tex && g.surface && g.surface !== 'smooth') GW.Tex.apply(g, r.geo);
     Gears.dirty = true;
   },
 
@@ -65,6 +66,7 @@ const Gears = GW.Gears = {
     m.metalness = g.metal; m.roughness = g.rough;
     m.transparent = g.opacity < 0.999; m.opacity = g.opacity;
     m.wireframe = !!g.wire; m.depthWrite = !m.transparent;
+    if(GW.Tex) GW.Tex.apply(g);
     g.mesh.visible = g.visible !== false;
     m.needsUpdate = true;
   },
@@ -95,7 +97,7 @@ const Gears = GW.Gears = {
     g[key] = val;
     if(key === 'finish'){
       const f = Types.FINISH[val];
-      if(f.color){ g.color = f.color; g.metal = f.metal; g.rough = f.rough; }
+      if(f.color){ g.color = f.color; g.metal = f.metal; g.rough = f.rough; g.surface = f.surface || 'smooth'; }
     } else if(key === 'color') g.finish = 'custom';
     else if(key === 'chainPreset'){ const p = Types.CHAIN[val]; if(p) Object.assign(g, p); }
     else if(key === 'beltPreset'){ const p = Types.BELT[val]; if(p) Object.assign(g, p); }

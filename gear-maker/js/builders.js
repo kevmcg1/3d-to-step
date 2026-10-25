@@ -23,7 +23,7 @@ const B = GW.Build = {
     const fn = B['b_' + g.type];
     if(!fn) throw new Error('no builder for ' + g.type);
     B._notes = []; B._fit = null;
-    const r = fn(g);
+    const r = fn(GW.Tol ? GW.Tol.apply(g) : g);
     r.info.notes = Array.from(new Set((r.info.notes || []).concat(B._notes)));
     const parts = Array.isArray(r.geo) ? r.geo : [r.geo];
     const merged = Geo.merge(parts);
@@ -412,10 +412,13 @@ const B = GW.Build = {
     const contour = ring.map(toV), hs = holes.map(h => h.map(toV));
     const faces = THREE.ShapeUtils.triangulateShape(contour, hs);
     const all = ring.concat(...holes);
-    faces.forEach(f => {
-      let [a, b, c] = f.map(i => all[i]);
-      const cr = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
-      if((cr > 0) !== up){ const t = b; b = c; c = t; }
+    // earcut winds every triangle the same way. Turn them all together, by the sign of the total area: deciding
+    // triangle by triangle breaks on slivers whose area is rounding noise, and those came out flipped.
+    const tris = faces.map(f => f.map(i => all[i]));
+    let sum = 0; tris.forEach(([a, b, c]) => { sum += (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x); });
+    const flip = (sum > 0) !== up;
+    tris.forEach(([a, b, c]) => {
+      if(flip){ const t = b; b = c; c = t; }
       tri([a.x, a.y, zz], [b.x, b.y, zz], [c.x, c.y, zz]);
     });
   },

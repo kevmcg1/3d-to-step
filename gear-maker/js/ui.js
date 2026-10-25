@@ -101,7 +101,7 @@ const UI = GW.UI = {
     const show = el => {
       const raw = el.getAttribute('data-tip'); if(!raw) return;
       const [t, ...rest] = raw.split('\n');
-      tip.innerHTML = '<b>' + esc(t) + '</b>' + esc(rest.join('\n'));
+      tip.innerHTML = '<b>' + esc(GW.Units.text(t)) + '</b>' + esc(GW.Units.text(rest.join('\n')));
       const r = el.getBoundingClientRect(), w = Math.min(250, tip.offsetWidth || 200);
       tip.classList.add('on');
       const tw = tip.offsetWidth, th = tip.offsetHeight;
@@ -115,7 +115,8 @@ const UI = GW.UI = {
 
   /* ================================================================== marking work to do
      (everything redraws on the next frame, however many changes came in) */
-  mark(f){ Object.assign(UI._dirty, f); if(!UI._tick){ UI._tick = requestAnimationFrame(() => { UI._tick = 0; UI.process(); }); } },
+  mark(f){ for(const k in f) if(f[k]) UI._dirty[k] = 1;                     // a request is never cancelled by a later "false"
+    if(!UI._tick){ UI._tick = requestAnimationFrame(() => { UI._tick = 0; UI.process(); }); } },
   process(){
     const d = UI._dirty; UI._dirty = {};
     if(d.list) UI.renderList();
@@ -163,10 +164,25 @@ const UI = GW.UI = {
     if(!g.parentId) return null;
     const P = G().get(g.parentId); if(!P) return null;
     const key = G().version + ':' + g.id + ':' + UI._sv;
-    if(g._st && g._st.key === key) return g._st.v;
-    const v = GW.Compat.check(P, g, { kind: g.linkKind === 'same shaft' ? 'shaft' : 'mesh' });
-    g._st = { key, v };
+    if(g._st && g._st.key === key && (g._st.real || UI.dragging || !UI.wantsReal(g))) return g._st.v;
+    let v = GW.Compat.check(P, g, { kind: g.linkKind === 'same shaft' ? 'shaft' : 'mesh' }), real = false;
+    // the rules say it fits: make sure the actual shapes really do (only for the gear being worked on, and not mid-drag)
+    if(!UI.dragging && UI.wantsReal(g)) real = true;
+    if(real && GW.Collide.applies(P, g, v)){
+      const ov = GW.Collide.overlap(P, g);
+      if(ov > GW.Collide.limit(v.kind)){
+        v = Object.assign({}, v, { ok: false, issues: v.issues.concat([{ level: 'err', id: 'collide', text: `<b>teeth collide</b> — the real shapes overlap by <span class="val">${(ov * 100).toFixed(1)}%</span> of the smaller gear while turning, even though the numbers look right. Check the tooth shape on both gears: pressure angle, tooth heights, profile shift and backlash.` }]) });
+      }
+    }
+    g._st = { key, v, real };
     return v;
+  },
+  /* the shape test is a little costly, so it runs for the selected gear and the gears next to it */
+  wantsReal(g){
+    // only when everything has settled: positions solved, nothing growing or flying (a half-built scene would give a wrong answer). Camera moves do not matter here: the answer must not change when the camera starts or stops.
+    // (a gear pops in with an overshoot past full size, so "ready" means exactly full size)
+    const s = UI.selId; if(s == null || G().dirty || G().list.some(x => x.scale != null && Math.abs(x.scale - 1) > 0.001)) return false;
+    return g.id === s || g.parentId === s || (G().get(g.parentId) && G().get(g.parentId).id === s);
   },
   _sv: 0,                                   // bumped on every settings change so cached statuses refresh
 
@@ -200,6 +216,10 @@ const UI = GW.UI = {
 
     // playback
     $('playBtn').onclick = () => UI.setPlaying(!G().spin);
+    const ub = $('unitBtn'), paintUnits = () => { ub.textContent = GW.Units.inch ? 'IN' : 'MM'; ub.setAttribute('aria-label', 'Units: ' + (GW.Units.inch ? 'inches (millimeters in parentheses)' : 'millimeters (inches in parentheses)')); };
+    paintUnits();
+    ub.onclick = () => { GW.Units.set(GW.Units.inch ? 'mm' : 'in'); paintUnits(); UI._sv++; UI._reads = {}; UI.mark({ fb: 1, sync: 1, list: 1 }); UI.toast(GW.Units.inch ? 'Showing inches, with millimeters in parentheses.' : 'Showing millimeters, with inches in parentheses.', 2200); };
+    $('labelBtn').onclick = () => GW.Labels.set(!GW.Labels.on);
     $('undoBtn').onclick = () => GW.History.undo(); $('redoBtn').onclick = () => GW.History.redo();
     GW.History.onState = () => { $('undoBtn').disabled = GW.History.at <= 0; $('redoBtn').disabled = GW.History.at >= GW.History.stack.length - 1; };
     const sp = $('speedR');
@@ -314,6 +334,12 @@ const UI = GW.UI = {
         note.innerHTML = '<div class="pin"><div class="hint">This gear is placed by its mesh. Un-mesh it to place it freely.</div></div>';
         body.appendChild(note);
       }
+      if(gr === 'Tolerance'){
+        const to = make('div', 'prow'); to.id = 'tolInfo';
+        to.innerHTML = '<div class="pin"><div class="tolbox"><p id="tolNums"></p><button type="button" class="go wide" id="bestFit" data-tip="Best-fit tolerances&#10;Gives every gear on the table this gear\'s process, opens bores and keyways by its allowance, and raises any backlash that is too tight.">Set best-fit tolerances for everything</button></div></div>';
+        body.appendChild(to);
+        setTimeout(() => { const b = $('bestFit'); if(b) b.onclick = () => UI.bestFit(UI.sel()); }, 0);
+      }
       if(gr === 'Motion'){
         const ro = make('div', 'prow'); ro.id = 'speedRo';
         ro.innerHTML = '<div class="pin"><div class="pr wide1"><label>Speed</label><b id="roSpeed" style="font-size:13px"></b></div><div class="hint" id="roWho"></div></div>';
@@ -347,7 +373,7 @@ const UI = GW.UI = {
   },
 
   group(name, count){
-    const grp = make('div', 'grp' + (UI.openGroups[name] ? ' open' : ''));
+    const grp = make('div', 'grp' + (UI.openGroups[name] ? ' open' : '')); grp.dataset.g = name;
     const gh = make('button', 'gh', ICON.chev + `<span>${name}</span><span class="gc">${count}</span>`);
     gh.onclick = () => { grp.classList.toggle('open'); UI.openGroups[name] = grp.classList.contains('open'); };
     const wrap = make('div', 'gwrap'); wrap.appendChild(make('div', 'gbody'));
@@ -379,7 +405,7 @@ const UI = GW.UI = {
       pr.appendChild(s); ctl.sync = () => { s.value = g.type; };
     } else if(kind === 'sel'){
       pr.classList.add('wide1');
-      const nice = { linkKind: { mesh: 'Mesh teeth', 'same shaft': 'Same shaft' }, hand: { right: 'Right hand', left: 'Left hand' }, flange: { none: 'None', both: 'Both sides', front: 'Front only', back: 'Back only' }, bodyStyle: { solid: 'Solid disc', webbed: 'Webbed', spoked: 'Spoked' } };
+      const nice = { linkKind: { mesh: 'Mesh teeth', 'same shaft': 'Same shaft' }, hand: { right: 'Right hand', left: 'Left hand' }, flange: { none: 'None', both: 'Both sides', front: 'Front only', back: 'Back only' }, bodyStyle: { solid: 'Solid disc', webbed: 'Webbed', spoked: 'Spoked' }, surface: GW.Tex ? GW.Tex.SURFACES : {}, tolerance: GW.Tol ? GW.Tol.LABELS : {} };
       const s = make('select'); unit.forEach(o => { const op = make('option', null, key === 'finish' ? FINISH[o].label : ((nice[key] && nice[key][o]) || o)); op.value = o; s.appendChild(op); });
       s.onchange = () => { apply(s.value); UI.flush(); };
       pr.appendChild(s); ctl.sync = () => { s.value = g[key]; };
@@ -394,22 +420,32 @@ const UI = GW.UI = {
     } else {
       const r = make('input'); r.type = 'range'; r.step = step;
       const u = make('div', 'u'); const n = make('input', 'num'); n.type = 'number'; n.step = 'any'; n.inputMode = 'decimal';
-      const un = make('span', 'un', unit || ''); u.appendChild(n); u.appendChild(un);
+      const Un = GW.Units, isLen0 = unit === 'mm';
+      const lenNow = () => isLen0 || (key === 'rpm' && g.type === 'rack');                    // a rack's "speed" is a travel speed in mm/s
+      const un = make('span', 'un', unit || ''), mmv = make('span', 'mmv'); u.appendChild(n); u.appendChild(un); u.appendChild(mmv);
+      const toD = v => lenNow() ? Un.d(v) : v, fromD = v => lenNow() ? Un.fromD(v) : v;
+      const fmtD = v => lenNow() ? Un.fmtD(v) : U.fmt(v, 4);
+      const dStep = () => lenNow() && Un.inch ? Math.max(0.001, +((+step || 1) / 25.4).toPrecision(1)) : (+step || 1);
+      const showAlt = v => { mmv.textContent = lenNow() ? '(' + Un.other(v) + (key === 'rpm' ? '/s' : '') + ')' : ''; };
       pr.appendChild(r); pr.appendChild(u);
       const fill = () => r.style.setProperty('--fill', U.clamp((r.value - r.min) / (r.max - r.min), 0, 1) * 100 + '%');
-      r.oninput = () => { n.value = U.fmt(+r.value, 4); fill(); apply(+r.value, true); };
+      r.oninput = () => { n.value = fmtD(+r.value); showAlt(+r.value); fill(); apply(+r.value, true); };
       r.addEventListener('pointerdown', () => UI.beginDrag());
       r.addEventListener('change', () => { UI.flush(); UI.endDrag(); });
-      n.oninput = () => { if(n.value === '' || isNaN(+n.value)) return; r.value = n.value; fill(); apply(+n.value, false); };
+      n.oninput = () => { if(n.value === '' || isNaN(+n.value)) return; const mm = fromD(+n.value); r.value = mm; showAlt(mm); fill(); apply(mm, false); };
       n.onchange = () => { UI.flush(); UI.syncProps(); };
-      n.onkeydown = e => { if(e.key === 'Enter') n.blur(); if(e.key === 'ArrowUp' || e.key === 'ArrowDown'){ e.preventDefault(); const s = +step || 1; n.value = U.fmt(+n.value + (e.key === 'ArrowUp' ? s : -s) * (e.shiftKey ? 10 : 1), 4); n.oninput(); } };
+      n.onkeydown = e => { if(e.key === 'Enter') n.blur(); if(e.key === 'ArrowUp' || e.key === 'ArrowDown'){ e.preventDefault(); const s = dStep(); n.value = U.fmt(+n.value + (e.key === 'ArrowUp' ? s : -s) * (e.shiftKey ? 10 : 1), 4); n.oninput(); } };
       ctl.sync = () => {
         const [lo, hi] = Types.range(g.type, key);
         r.min = lo; r.max = hi;
-        if(g.type === 'rack' && key === 'rpm') { un.textContent = 'mm/s'; lab.textContent = 'Travel speed'; } else if(key === 'rpm'){ un.textContent = 'rpm'; lab.textContent = label; }
+        const rackSpeed = g.type === 'rack' && key === 'rpm';
+        if(rackSpeed) lab.textContent = 'Travel speed'; else if(key === 'rpm'){ un.textContent = 'rpm'; lab.textContent = label; }
         const v = g[key];
+        if(lenNow()) un.textContent = (Un.inch ? 'in' : 'mm') + (rackSpeed ? '/s' : '');
+        showAlt(v);
         if(+r.value !== v) r.value = v;
-        if(document.activeElement !== n && (n.value === '' || +n.value !== v)){ n.value = U.fmt(v, 4); }
+        const want = fmtD(v);
+        if(document.activeElement !== n && n.value !== want){ n.value = want; }
         fill();
       };
     }
@@ -439,19 +475,20 @@ const UI = GW.UI = {
       c.row.classList.toggle('off', !vis);
     });
     const linked = !!g.parentId;
+    const tn = $('tolNums'); if(tn) tn.innerHTML = UI.tolText(g);
     const pn = $('placeNote'); if(pn) pn.classList.toggle('off', !linked);
     const sr = $('speedRo'); if(sr) sr.classList.toggle('off', !linked);
     if(linked) UI.updateSpeedReadout(g);
     // header
     const nm = document.querySelector('.ph input.txt'); if(nm && document.activeElement !== nm) nm.value = g.name;
     // notes where the geometry had to be trimmed to fit
-    const adj = $('adj'); if(adj){ const n = g.info && g.info.notes || []; adj.innerHTML = n.length ? `<div class="adjnote"><b>Adjusted to fit:</b> ${n.map(esc).join(' · ')}</div>` : ''; }
+    const adj = $('adj'); if(adj){ const n = g.info && g.info.notes || []; adj.innerHTML = n.length ? `<div class="adjnote"><b>Adjusted to fit:</b> ${n.map(x => esc(GW.Units.text(x))).join(' · ')}</div>` : ''; }
     UI.syncConn(g);
   },
   updateSpeedReadout(g){
     const el = $('roSpeed'); if(!el) return;
     const w = g.rt.omega || 0;
-    el.textContent = g.type === 'rack' ? U.fmt(Math.abs(w), 2) + ' mm/s' : U.fmt(Math.abs(w * 30 / Math.PI), 2) + ' rpm' + (w < 0 ? ' (reverse)' : '');
+    el.textContent = g.type === 'rack' ? GW.Units.text(U.fmt(Math.abs(w), 2) + ' mm/s') : U.fmt(Math.abs(w * 30 / Math.PI), 2) + ' rpm' + (w < 0 ? ' (reverse)' : '');
     const P = G().get(g.parentId), who = $('roWho'); if(who && P) who.textContent = 'Driven by ' + P.name + '.';
   },
 
@@ -614,6 +651,7 @@ const UI = GW.UI = {
     const C = GW.Compat;
     let head, cols = '', cls = '';
     const kindName = k => ({ ext: 'Parallel-shaft pair', ring: 'Ring and pinion', rack: 'Rack and pinion', bevel: 'Bevel pair', crown: 'Crown and pinion', worm: 'Worm drive', chain: 'Chain drive', belt: 'Belt drive', cyc: 'Cycloidal pair', ell: 'Elliptical pair', spline: 'Spline fit', shaft: 'Same shaft' }[k] || 'Pair');
+    UI.kindName = kindName;
     const linkOpt = () => ({ kind: UI.linkChoice === 'same shaft' ? 'shaft' : 'mesh' });
     UI._fbCtx = null;
 
@@ -648,7 +686,7 @@ const UI = GW.UI = {
         needHtml += warns.map(i => item(i, 'warn')).join('');
       }
       const notes = (g.info && g.info.notes) || [];
-      needHtml += notes.map(n => `<div class="need warn"><div class="tx">⚠ Adjusted to fit: ${esc(n)}</div></div>`).join('');
+      needHtml += notes.map(n => `<div class="need warn"><div class="tx">⚠ Adjusted to fit: ${esc(GW.Units.text(n))}</div></div>`).join('');
 
       // chips: the gears this one drives, and (for a free gear) gears it could mesh with
       let chips = '';
@@ -666,7 +704,7 @@ const UI = GW.UI = {
       }
 
       const infoRows = res ? res.info.map(r => ({ k: r[0], v: r[1] })) : [];
-      const reads = UI.ownReads(g).concat(infoRows.slice(0, 5)).map(r => `<div class="rd${r.v && r.v.length > 14 ? ' w2' : ''}" title="${esc(r.v || '')}"><span>${esc(r.k)}</span><b data-num="${r.num != null ? r.num : ''}" data-fmt="${r.fmt || ''}">${r.num != null ? '' : esc(r.v)}${r.unit ? ' <small>' + r.unit + '</small>' : ''}</b></div>`).join('');
+      const reads = UI.ownReads(g).concat(infoRows.slice(0, 5)).map(r => `<div class="rd${r.v && GW.Units.text(r.v).length > 16 ? ' w2' : ''}" title="${esc(r.v || '')}"><span>${esc(r.k)}</span><b data-num="${r.num != null ? r.num : ''}" data-fmt="${r.fmt || ''}"${r.unit === 'mm' || r.unit === 'mm/s' ? ' data-len="' + r.unit + '"' : ''}>${r.num != null ? '' : esc(r.v)}${r.unit ? ' <small>' + (r.unit === 'mm' || r.unit === 'mm/s' ? '' : r.unit) + '</small>' + (r.unit === 'mm' || r.unit === 'mm/s' ? '<small class="alt"></small>' : '') : ''}</b></div>`).join('');
 
       const actions = [];
       if(mode === 'free' && P && res){
@@ -681,6 +719,12 @@ const UI = GW.UI = {
         if(errs.some(i => i.optA)) actions.push(`<button class="mini" data-act="fixall-A">Fix all on ${esc(P.name)}</button>`);
         actions.push(`<button class="mini" data-act="unmesh">Un-mesh ${esc(Cc.name)}</button>`);
       } else if(mode === 'linked'){ actions.push(`<button class="mini" data-act="unmesh">Un-mesh</button>`); }
+
+      // the two ways out when this gear no longer fits the gears around it
+      if(UI.problemLinks(g).length){
+        actions.push(`<button class="mini go" data-act="match" data-tip="Change the other gears&#10;Adjust every gear linked to this one so it fits these settings, then show what changed.">Change other gears to match</button>`);
+        actions.push(`<button class="mini" data-act="explain" data-tip="Why not?&#10;A detailed explanation of what clashes. Nothing is changed.">Explain why</button>`);
+      }
 
       if(mode === 'linked'){
         cls = res && res.ok ? 'ok' : 'bad';
@@ -700,7 +744,7 @@ const UI = GW.UI = {
       UI._fbCtx = { P, partner: P, res, g: Cc, sel: g };
     }
     fb.classList.toggle('ok', cls === 'ok'); fb.classList.toggle('bad', cls === 'bad');
-    body.innerHTML = `<div class="fb-body"><div class="fb-head"><span class="orb ${head.orb}"></span><span class="fb-title">${head.title}</span><span class="fb-sub">${esc(head.sub)}</span></div>${cols ? `<div class="fb-cols">${cols}</div>` : ''}</div>`;
+    body.innerHTML = GW.Units.text(`<div class="fb-body"><div class="fb-head"><span class="orb ${head.orb}"></span><span class="fb-title">${head.title}</span><span class="fb-sub">${esc(head.sub)}</span></div>${cols ? `<div class="fb-cols">${cols}</div>` : ''}</div>`);
     body.querySelector('.fb-head').onclick = () => UI.toggleFeedback();
     UI.wireFeedback(body);
     // numbers glide to their new values
@@ -709,7 +753,11 @@ const UI = GW.UI = {
       const key = (UI.selId || 0) + ':' + el.parentNode.querySelector('span').textContent;
       const prev = UI._reads && UI._reads[key] != null ? UI._reads[key] : v;
       (UI._reads = UI._reads || {})[key] = v;
-      const f = el.dataset.fmt, put = x => { el.firstChild.textContent = f === 'int' ? Math.round(x) : U.fmt(x, f === 'd1' ? 1 : 2); };
+      const f = el.dataset.fmt, len = el.dataset.len, Un = GW.Units;
+      const put = x => {
+        if(len){ el.firstChild.textContent = Un.fmtD(x); const sm = el.querySelector('small'), al = el.querySelector('small.alt'); if(sm) sm.textContent = ' ' + (Un.inch ? 'in' : 'mm') + (len === 'mm/s' ? '/s' : ''); if(al) al.textContent = '(' + Un.other(x) + (len === 'mm/s' ? '/s' : '') + ')'; return; }
+        el.firstChild.textContent = f === 'int' ? Math.round(x) : U.fmt(x, f === 'd1' ? 1 : 2);
+      };
       if(!el.firstChild || el.firstChild.nodeType !== 3) el.insertBefore(document.createTextNode(''), el.firstChild);
       if(Math.abs(prev - v) < 1e-9) put(v); else GW.Anim.tween(380, (p, e) => put(prev + (v - prev) * e), { key });
     });
@@ -734,12 +782,202 @@ const UI = GW.UI = {
       const { P, g } = ctx, partner = P, a = b.dataset.act, kind = UI.linkChoice;
       if(a === 'mesh') UI.doLink(partner, g, kind, null);
       else if(a === 'force') UI.doLink(partner, g, kind, null);
+      else if(a === 'match') UI.matchOthers(UI.sel() || g);
+      else if(a === 'explain') UI.explain(UI.sel() || g);
       else if(a === 'fixmesh-B') UI.fixAll(partner, g, 'B', kind);
       else if(a === 'fixmesh-A') UI.fixAll(partner, g, 'A', kind);
       else if(a === 'fixall-B') UI.fixAll(P, g, 'B');
       else if(a === 'fixall-A') UI.fixAll(P, g, 'A');
       else if(a === 'unmesh'){ G().unlink(g.id); UI._sv++; UI.toast(g.name + ' is free again.'); UI.mark({ list: 1, fb: 1, props: 1, helpers: 1 }); }
     });
+  },
+
+  /* what the chosen process does to this gear, in words and numbers */
+  tolText(g){
+    const a = GW.Tol.allowance(g), mb = GW.Tol.minBacklash(g), P = GW.Tol.of(g);
+    const parts = [];
+    if(g.bore > 0 && a.bore > 0) parts.push(`Bore is cut <b class="val">${U.fmt(g.bore + a.bore, 3)} mm</b> for a ${U.fmt(g.bore, 3)} mm shaft (+${U.fmt(a.bore, 3)} mm).`);
+    if(g.keyW > 0 && a.key > 0) parts.push(`Keyway is opened by ${U.fmt(a.key, 3)} mm.`);
+    if(mb > 0) parts.push(`Smallest backlash for ${esc(P.label.replace(/ \(.*/, ''))}: <b class="val">${U.fmt(mb, 3)} mm</b>${g.backlash < mb - 1e-6 ? ' (this gear has less)' : ''}.`);
+    return GW.Units.text(parts.join(' ') || 'No tolerance is added: the part is built to the exact numbers.');
+  },
+  /* give every gear one process, open bores to match, and lift any backlash that is too tight to run */
+  bestFit(g){
+    if(!g) return; GW.History.commit();
+    const proc = g.tolerance, changed = [];
+    G().list.forEach(x => {
+      if(x.tolerance !== proc){ G().set(x, 'tolerance', proc); }
+      const mb = GW.Tol.minBacklash(x);
+      if(GW.Tol.hasTeeth(x) && x.backlash < mb - 1e-6){ changed.push(`${x.name}: backlash ${U.fmt(x.backlash, 3)} → ${U.fmt(mb, 3)} mm`); G().set(x, 'backlash', +mb.toFixed(3)); }
+    });
+    G().dirty = true; UI._sv++; G().list.forEach(x => { x._st = null; });
+    UI.mark({ list: 1, fb: 1, props: 1, helpers: 1 }); UI.flush(); GW.History.commit();
+    UI.toast(changed.length ? `Best-fit tolerances set (${GW.Tol.PROCESSES[proc].label.replace(/ \(.*/, '')}). Backlash raised on ${changed.length} gear${changed.length > 1 ? 's' : ''}.` : `Best-fit tolerances set for ${G().list.length} gear${G().list.length > 1 ? 's' : ''} (${GW.Tol.PROCESSES[proc].label.replace(/ \(.*/, '')}).`);
+  },
+
+  /* ================================================================== matching the neighbors / explaining a clash */
+  /* the links around a gear (to its parent and to each child) that do not currently fit */
+  problemLinks(g){
+    const out = [];
+    if(g.parentId){ const st = UI.statusOf(g); if(st && st.supported && !st.ok) out.push({ parent: G().get(g.parentId), child: g, res: st }); }
+    G().children(g.id).forEach(k => { const st = UI.statusOf(k); if(st && st.supported && !st.ok) out.push({ parent: g, child: k, res: st }); });
+    return out;
+  },
+  plain(html){ return String(html).replace(/<[^>]+>/g, ''); },
+  fmtVal(key, v, gear){
+    const def = GW.Types.PARAMS[key] || GW.Types.LINK_PARAMS[key] || [], unit = def[6];
+    if(key === 'type') return GW.Types.TYPES[v] ? GW.Types.TYPES[v].label : v;
+    if(unit === 'mm') return U.fmt(+v, 3) + ' mm';                 // callers pass the text through Units.text
+    if(typeof v === 'number') return U.fmt(v, 3) + (Array.isArray(unit) ? '' : (unit ? ' ' + unit : ''));
+    return String(v);
+  },
+  label(key){ const d = GW.Types.PARAMS[key] || GW.Types.LINK_PARAMS[key]; return d ? d[0] : key; },
+
+  /* change every gear linked to this one (and the gears linked to those) so each pair fits again, and report it */
+  matchOthers(g){
+    const log = [], seen = new Set([g.id]), queue = [g], touched = [];
+    GW.History.commit();
+    while(queue.length){
+      const X = queue.shift();
+      const nb = []; if(X.parentId) nb.push(G().get(X.parentId)); G().children(X.id).forEach(k => nb.push(k));
+      nb.forEach(N => {
+        if(!N || seen.has(N.id)) return; seen.add(N.id); queue.push(N);
+        const kid = N.parentId === X.id, parent = kid ? X : N, child = kid ? N : X;
+        const link = { kind: child.linkKind === 'same shaft' ? 'shaft' : 'mesh' };
+        const before = GW.Compat.check(parent, child, link);
+        if(before.ok) return;
+        const why = before.issues.filter(i => i.level === 'err').map(i => UI.plain(i.text));
+        const plan = GW.Compat.plan(parent, child, link, kid ? 'B' : 'A');
+        const set = kid ? plan.B : plan.A;                     // only the OTHER gear is changed; this one stays as it is
+        const keys = Object.keys(set || {}); if(!keys.length) return;
+        const from = {}; keys.forEach(k => { from[k] = N[k]; });
+        if(set.type) G().set(N, 'type', set.type);
+        keys.forEach(k => { if(k !== 'type') G().set(N, k, set[k]); });
+        log.push({ gear: N, with: X, why, changes: keys.map(k => ({ key: k, from: from[k], to: N[k] })) });
+        touched.push(N);
+      });
+    }
+    G().dirty = true; UI._sv++; UI.selId === g.id || (UI.selId = g.id);
+    G().list.forEach(x => { x._st = null; });
+    UI.mark({ list: 1, fb: 1, props: 1, helpers: 1 }); UI.flush();
+    // anything that still does not fit (needs a change on THIS gear)
+    const left = [];
+    seen.forEach(id => { const x = G().get(id); if(!x || !x.parentId || !seen.has(x.parentId)) return; const st = UI.statusOf(x); if(st && !st.ok) left.push({ gear: x, parent: G().get(x.parentId), issues: st.issues.filter(i => i.level === 'err') }); });
+    UI.showMatchReport(g, log, left);
+    GW.History.commit();
+  },
+
+  showMatchReport(g, log, left){
+    const row = c => `<li><b>${esc(UI.label(c.key))}</b>: ${esc(GW.Units.text(UI.fmtVal(c.key, c.from)))} <span class="arrow">→</span> <b class="val">${esc(GW.Units.text(UI.fmtVal(c.key, c.to)))}</b></li>`;
+    let html = `<div class="mhead"><h3>Other gears now match ${esc(g.name)}</h3><button class="iconbtn" id="mClose" aria-label="Close">${ICON.x}</button></div><div class="mbody an">`;
+    if(!log.length) html += `<p>Nothing could be changed on the other gears to fix this. See below for what ${esc(g.name)} itself needs.</p>`;
+    else html += `<p>${log.length} gear${log.length > 1 ? 's were' : ' was'} adjusted so every link fits ${esc(g.name)}'s new settings. ${esc(g.name)} was left exactly as you set it.</p>`;
+    log.forEach(e => {
+      html += `<section class="anx"><h4>${esc(e.gear.name)} <small>(was clashing with ${esc(e.with.name)})</small></h4><ul>${e.changes.map(row).join('')}</ul>`;
+      if(e.why.length) html += `<p class="why">Because: ${e.why.map(w => esc(GW.Units.text(w))).join('; ')}.</p>`;
+      html += '</section>';
+    });
+    if(left.length){
+      html += '<section class="anx bad"><h4>Still not compatible</h4><p>These cannot be fixed by changing the other gear. They need a change on the gear you edited:</p><ul>';
+      left.forEach(l => { l.issues.forEach(i => { html += `<li><b>${esc(l.gear.name)} + ${esc(l.parent.name)}</b>: ${GW.Units.text(i.text)}</li>`; }); });
+      html += '</ul></section>';
+    } else if(log.length) html += '<p class="okline">' + ICON.check + '<span>Every link around ' + esc(g.name) + ' now fits.</span></p>';
+    html += `<div class="mfoot"><button id="mUndo">Undo these changes</button><button class="go" id="mOk">Done</button></div></div>`;
+    UI.openModal(html);
+    $('mClose').onclick = $('mOk').onclick = UI.closeModal;
+    $('mUndo').onclick = () => { UI.closeModal(); GW.History.undo(); };
+  },
+
+  /* the plain-English reason behind each kind of clash */
+  WHY: {
+      m: 'Teeth only fit into the gaps of another gear if they are the same size. The module sets the tooth size, so two meshing gears must share it exactly.',
+      pa: 'The pressure angle is the slope of the tooth flank. Flanks with different slopes touch at a point instead of rolling along each other, which wears fast and runs noisily.',
+      helix: 'Slanted teeth must lean opposite ways (or the same angle against a ring or rack) so the slants line up along the whole width of the teeth.',
+      clearance: 'A tooth tip must stay clear of the root of the tooth space it enters. If it reaches into the root the two gears jam or the teeth break.',
+      undercut: 'With few teeth the root of each tooth gets cut away by the tooth shape. That weakens the tooth. A profile shift or more teeth fixes it.',
+      contact: 'The contact ratio is how many teeth are touching on average. Below about 1.2 the load jumps from tooth to tooth, and below 1 the drive stalls and skips.',
+      apart: 'The gears are being held at a distance from each other that is not the meshing distance, so teeth do not reach into each others gaps.',
+      collide: 'The numbers say the gears fit, but the real shapes overlap while turning. Something about the tooth shape (heights, shift, backlash) makes the teeth run into each other.',
+      type: 'These two kinds of gear cannot be paired directly. A different type on one side makes the pair work.',
+      z: 'The tooth counts have a problem for this pair: for example the teeth must divide evenly around a ring, or a gear is too small for the other.',
+      bore: 'Two gears on one shaft need the same bore, or one of them wobbles or does not fit.',
+      thick: 'The faces of the two gears barely overlap along the shaft, so only a small part of each tooth carries load.',
+      backlash: 'Backlash is the little gap between teeth. With none at all, parts that are printed or machined will bind.',
+      phase: 'The teeth of the two gears are not lined up as they must be at the start of the mesh.',
+      cone: 'Bevel gears must have cone angles that add up to the angle between the shafts.',
+      spiral: 'Spiral bevel teeth must curve in opposite directions to run together.',
+      chainPitch: 'A chain only sits on the sprocket teeth if the pitch of the chain and the sprocket are the same.', rollerDia: 'The roller of the chain must be the same size on both sprockets or it rides up the tooth.',
+      beltPitch: 'A timing belt only sits in the pulley grooves if the belt pitch is the same on both pulleys.', majorA: 'Elliptical gears only roll against each other if their ellipses are the same size.', rollR: 'Cycloidal teeth only roll together if they were cut with the same rolling circle.'
+    },
+
+  /* a detailed explanation of what clashes, why, and every way out; changes nothing until an option is applied */
+  explain(g){
+    const links = UI.problemLinks(g), T2 = t => esc(GW.Units.text(t));
+    const val = (k, v) => T2(UI.fmtVal(k, v));
+    // the changes of one fix plan, as a table: setting, now, becomes
+    const changesTable = (gear, set, why) => {
+      const keys = Object.keys(set || {}); if(!keys.length) return '';
+      return `<table class="chg"><thead><tr><th>${esc(gear.name)}</th><th>Now</th><th></th><th>Change to</th></tr></thead><tbody>${keys.map(k => `<tr><td>${esc(UI.label(k))}</td><td>${val(k, gear[k])}</td><td class="arrow">→</td><td class="to">${val(k, set[k])}</td></tr>`).join('')}</tbody></table>`;
+    };
+    // what a plan leaves behind once it is applied (checked on copies, nothing is touched)
+    const outcome = (P, C, link, plan) => {
+      const a = Object.assign({}, P, plan.A || {}, Object.keys(plan.A || {}).length ? { info: null } : {}), b = Object.assign({}, C, plan.B || {}, Object.keys(plan.B || {}).length ? { info: null } : {});
+      const r = GW.Compat.check(a, b, link), errs = r.issues.filter(i => i.level === 'err');
+      return errs.length ? { ok: false, left: errs.map(i => UI.plain(i.text)) } : { ok: true, left: [] };
+    };
+    let html = `<div class="mhead"><h3>Why ${esc(g.name)} does not fit</h3><button class="iconbtn" id="mClose" aria-label="Close">${ICON.x}</button></div><div class="mbody an">`;
+    if(!links.length) html += `<p class="okline">${ICON.check}<span>Everything linked to ${esc(g.name)} fits. Nothing to explain.</span></p>`;
+    else html += `<p class="lead"><b>${links.length} link${links.length > 1 ? 's' : ''}</b> around ${esc(g.name)} ${links.length > 1 ? 'do' : 'does'} not fit. For each one you get <b>1. what clashes</b>, <b>2. why it matters</b> and <b>3. every way to fix it</b>. Nothing is changed until you press an Apply button.</p>`;
+    const applies = [];
+    links.forEach((L, li) => {
+      const P = L.parent, C = L.child, other = P === g ? C : P;
+      const link = { kind: C.linkKind === 'same shaft' ? 'shaft' : 'mesh' };
+      const errs = L.res.issues.filter(i => i.level === 'err'), warns = L.res.issues.filter(i => i.level !== 'err');
+      html += `<section class="anx bad"><h4>${esc(g.name)} + ${esc(other.name)} <small>${esc(UI.kindName(L.res.kind))}</small><span class="verdict">${errs.length} problem${errs.length > 1 ? 's' : ''}</span></h4>`;
+
+      // 1 + 2: what clashes and why it matters
+      html += '<h5><i>1</i> What clashes, and why it matters</h5><div class="probs">';
+      errs.forEach(i => {
+        const key = (GW.Types.PARAMS[i.id] || GW.Types.LINK_PARAMS[i.id]) ? i.id : null;
+        html += `<div class="prob"><div class="pt">${GW.Units.text(i.text)}</div>`;
+        if(key) html += `<table class="cmp"><tr><th></th><th>${esc(P.name)}</th><th>${esc(C.name)}</th></tr><tr><td>${esc(UI.label(key))}</td><td>${val(key, P[key])}</td><td>${val(key, C[key])}</td></tr></table>`;
+        html += `<p class="whyt">${esc(UI.WHY[i.id] || 'The two gears cannot work together this way.')}</p></div>`;
+      });
+      html += '</div>';
+
+      // 3: every way out
+      html += '<h5><i>2</i> Your options</h5><div class="opts">';
+      const optFor = (side, title, lead, thisFirst) => {
+        const plan = GW.Compat.plan(P, C, link, side), onOther = other === P ? plan.A : plan.B, onThis = other === P ? plan.B : plan.A;
+        const nO = Object.keys(onOther || {}).length, nT = Object.keys(onThis || {}).length;
+        if(!nO && !nT) return `<div class="opt dead"><h6>${title}</h6><p>${lead} Not possible here: none of the problems can be solved this way.</p></div>`;
+        const res = outcome(P, C, link, plan), id = applies.push({ P, C, plan }) - 1;
+        const first = thisFirst ? [g, onThis] : [other, onOther], second = thisFirst ? [other, onOther] : [g, onThis];
+        const left = res.left.map(x => x.replace(/[.\s]+$/, ''));
+        return `<div class="opt ${res.ok ? 'good' : ''}"><h6>${title}</h6><p>${lead}</p>${changesTable(first[0], first[1])}${Object.keys(second[1] || {}).length ? `<p class="also">This option also needs these changes on <b>${esc(second[0].name)}</b>:</p>${changesTable(second[0], second[1])}` : ''}
+          <p class="res ${res.ok ? 'ok' : 'bad'}">${res.ok ? '✓ After this the pair fits.' : '✗ Still not fitting afterwards: ' + left.map(T2).join('; ') + '.'}</p>
+          <button class="go apply" data-ap="${id}">Apply this option</button></div>`;
+      };
+      html += optFor(P === g ? 'B' : 'A', `Option A · Change ${esc(other.name)} to match ${esc(g.name)}`, `${esc(g.name)} stays exactly as you set it.`, false);
+      html += optFor(P === g ? 'A' : 'B', `Option B · Change ${esc(g.name)} to match ${esc(other.name)}`, `${esc(other.name)} stays as it is; ${esc(g.name)} is changed to what ${esc(other.name)} needs.`, true);
+      const fits = GW.Compat.partnersOf(P === g ? g.type : P.type);
+      html += `<div class="opt"><h6>Option C · Take the link away</h6><p>Un-mesh ${esc(C.name)}. It keeps its shape and stays where it is, it just stops following ${esc(P.name)}.</p><button class="apply" data-un="${C.id}">Un-mesh ${esc(C.name)}</button></div>`;
+      html += `<div class="opt"><h6>Option D · Pick a different partner type</h6><p>A ${esc(GW.Types.TYPES[g.type].label.toLowerCase())} can mesh with: ${GW.Compat.partnersOf(g.type).map(t => esc(GW.Types.TYPES[t].label)).join(', ') || 'nothing else'}. Add one from the Connection section of the properties panel and it is set up to fit.</p></div>`;
+      html += '</div>';
+      if(warns.length) html += `<h5><i>!</i> Also worth knowing</h5><ul class="warns">${warns.map(i => `<li>${GW.Units.text(i.text)}</li>`).join('')}</ul>`;
+      html += '</section>';
+    });
+    html += `<div class="mfoot"><button id="mMatch" class="go">Change ALL other gears to match</button><button id="mOk">Close</button></div></div>`;
+    UI.openModal(html);
+    $('mClose').onclick = $('mOk').onclick = UI.closeModal;
+    $('mMatch').onclick = () => { UI.closeModal(); UI.matchOthers(g); };
+    if(!links.length) $('mMatch').style.display = 'none';
+    document.querySelectorAll('#modal [data-ap]').forEach(b => b.onclick = () => {
+      const o = applies[+b.dataset.ap]; GW.History.commit();
+      G().applyPlan(o.P, o.C, o.plan); G().dirty = true; UI._sv++; G().list.forEach(x => { x._st = null; });
+      UI.closeModal(); UI.mark({ list: 1, fb: 1, props: 1, helpers: 1 }); UI.flush(); GW.History.commit(); UI.toast('Option applied. Undo (Ctrl+Z) takes it back.');
+    });
+    document.querySelectorAll('#modal [data-un]').forEach(b => b.onclick = () => { GW.History.commit(); G().unlink(+b.dataset.un); UI._sv++; UI.closeModal(); UI.mark({ list: 1, fb: 1, props: 1, helpers: 1 }); GW.History.commit(); UI.toast('Un-meshed. Undo (Ctrl+Z) takes it back.'); });
   },
 
   /* ================================================================== modals */
@@ -752,12 +990,12 @@ const UI = GW.UI = {
   /* the little status card: an icon for what kind of message it is, and an outline that draws itself
      once around the card each time a message arrives */
   toast(msg, ms, kind){
-    const t = $('toast');
+    const t = $('toast'); msg = String(msg);
     kind = kind || (/cannot|could not|failed|not a /i.test(msg) ? 'bad' : /but the teeth|\bbut\b.*(fit|mesh)/i.test(msg) ? 'warn' : /^(undid|redid)/i.test(msg) ? 'undo' : /deleted|removed|clear|free again/i.test(msg) ? 'del' : 'ok');
     const ic = { ok: '<path d="M5 12.5l4.5 4.5L19 7.5"/>', bad: '<circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.5v.1"/>', warn: '<path d="M12 4 2.8 20h18.4zM12 10v5M12 17.5v.1"/>', del: '<path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13"/>', undo: '<path d="M9 14 4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3"/>' }[kind];
     t.className = 'toast ' + kind;
     t.innerHTML = '<svg class="t-ic" viewBox="0 0 24 24">' + ic + '</svg><span class="t-tx"></span><svg class="t-ring" preserveAspectRatio="none"><rect pathLength="1" x="0.75" y="0.75" rx="10" ry="10"/></svg>';
-    t.querySelector('.t-tx').textContent = msg;
+    t.querySelector('.t-tx').textContent = GW.Units.text(msg);
     const r = t.querySelector('.t-ring rect'); const b = t.getBoundingClientRect();
     r.setAttribute('width', Math.max(10, b.width - 1.5)); r.setAttribute('height', Math.max(10, b.height - 1.5));
     t.classList.remove('show'); void t.offsetWidth; t.classList.add('show');
@@ -837,7 +1075,7 @@ const UI = GW.UI = {
       st.split = $('xSplit').checked; st.name = $('xName').value;
       const solids = GW.Export.collect(st.scope, st.pose, UI.selId, st.pose === 'world');
       const s = GW.Export.stats(solids);
-      $('xInfo').textContent = solids.length ? `${solids.length} part${solids.length > 1 ? 's' : ''} · ${s.tris.toLocaleString()} triangles · ${s.size.map(v => U.fmt(v, 1)).join(' × ')} mm` : 'Nothing to export.';
+      $('xInfo').textContent = solids.length ? `${solids.length} part${solids.length > 1 ? 's' : ''} · ${s.tris.toLocaleString()} triangles · ${s.size.map(v => GW.Units.fmtD(v)).join(' × ')} ${GW.Units.unit()} (${s.size.map(v => GW.Units.other(v).replace(/ (mm|in)$/, '')).join(' × ')} ${GW.Units.inch ? 'mm' : 'in'})` : 'Nothing to export.';
       $('xGo').disabled = !solids.length;
     };
     document.querySelectorAll('#modal input').forEach(i => i.oninput = update);

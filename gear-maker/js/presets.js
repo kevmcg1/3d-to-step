@@ -156,4 +156,16 @@ GW.Presets.showcase = function(){
     p.build(gx, gy);
   });
 };
+
+/* every gear in a sample gets its own color, so it is easy to see which gear is which */
+const hsl = (h, s2, l) => { const a = s2 * Math.min(l, 1 - l), f = n => { const k = (n + h / 30) % 12; const c = l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)); return Math.round(255 * c).toString(16).padStart(2, '0'); }; return '#' + f(0) + f(8) + f(4); };
+GW.sampleColor = i => hsl((28 + i * 137.508) % 360, 0.62, 0.56);
+GW.Presets.forEach(p => {
+  const build = p.build;
+  p.build = function(x, y){
+    const before = new Set(G().list), made = build.call(this, x, y);
+    G().list.filter(g => !before.has(g)).forEach((g, i) => { G().set(g, 'color', GW.sampleColor(i)); const mb = GW.Tol ? GW.Tol.minBacklash(g) : 0; if(mb > g.backlash) G().set(g, 'backlash', +mb.toFixed(3)); G().set(g, 'metal', 0.3); G().set(g, 'rough', 0.45); });
+    return made;
+  };
+});
 })();

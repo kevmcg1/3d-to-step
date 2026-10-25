@@ -8,15 +8,20 @@ GW.Scene = {
   init(container){
     const S = GW.Scene;
     S.container = container;
-    S.renderer = new T.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
-    S.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    /* light mode for slow machines: no antialiasing, one pixel per pixel, 30 frames a second, and it only draws when
+       something changed. It is chosen from the hardware, and also switched on by itself if frames turn out slow. */
+    const lite = S.lite = GW.Perf.lite;
+    S.renderer = new T.WebGLRenderer({ antialias: !lite, alpha: true, preserveDrawingBuffer: false, powerPreference: lite ? 'low-power' : 'high-performance' });
+    S.renderer.setPixelRatio(lite ? 1 : Math.min(window.devicePixelRatio || 1, 1.5));
     S.renderer.setClearColor(0x0d0e10, 0);
     S.renderer.domElement.className = 'gl';
     container.appendChild(S.renderer.domElement);
 
     S.scene = new T.Scene();
-    S.scene.fog = new T.Fog(0x131518, 400, 1400);
-    S.camera = new T.PerspectiveCamera(42, 1, 0.5, 6000);
+    /* everything is orthographic: parallel lines stay parallel, so sizes read true from any angle.
+       orbit.dist is the zoom: the visible height is 2 * dist * HALF (the same framing the old perspective view had). */
+    S.HALF = Math.tan(U.rad(21)); S.CAMD = 5000;
+    S.camera = new T.OrthographicCamera(-1, 1, 1, -1, 100, 10000);
     S.orbit = { theta: -0.55, phi: 1.0, dist: 150, target: new T.Vector3(0, 0, 0) };
 
     S.scene.add(new T.HemisphereLight(0xe6ecf5, 0x2a2d35, 0.95));
@@ -82,31 +87,47 @@ GW.Scene = {
   resize(){
     const S = GW.Scene, { w, h } = S.size();
     S.renderer.setSize(w, h);
-    S.camera.aspect = w / h;
-    S.camera.updateProjectionMatrix();
+    S.updateCam();
   },
 
   /* how much of the stage's bottom the feedback strip covers (eased, so opening / closing it slides the view) */
+  /* what sits over the stage is measured a few times a second, not every frame (measuring forces the browser to lay the page out) */
+  measure(){
+    const S = GW.Scene, t = performance.now();
+    if(S._m && t - S._mt < 120) return S._m;
+    const fb = document.getElementById('feedback'), vp = document.getElementById('vp'), vw = document.getElementById('views');
+    S._mt = t;
+    return (S._m = {
+      bottom: fb ? fb.offsetHeight + 22 : 0,
+      top: vp && vp.offsetParent ? vp.offsetTop + vp.offsetHeight + 8 : 0,
+      right: vw && vw.offsetParent && window.innerWidth > 640 ? vw.offsetWidth + 20 : 0
+    });
+  },
   insetBottom(){
-    const fb = document.getElementById('feedback'), want = fb ? fb.offsetHeight + 22 : 0;
-    const S = GW.Scene;
+    const S = GW.Scene, want = S.measure().bottom;
     S._inset = GW.Anim.chase(S._inset == null ? want : S._inset, want, 0.14);
     return S._inset;
   },
+  /* the parts of the stage that always have something over them: the toolbar along the top, the view buttons down the right */
+  insetTop(){ return GW.Scene.measure().top; },
+  insetRight(){ return GW.Scene.measure().right; },
   updateCam(){
     const S = GW.Scene, o = S.orbit, c = S.camera;
     const inset = S.insetBottom(), { w, h } = S.size();
-    if(inset > 2 && inset < h * 0.8) c.setViewOffset(w, h, 0, inset / 2, w, h); else c.clearViewOffset();
+    o.dist = U.clamp(o.dist, 8, 3000);
+    const hh = o.dist * S.HALF, ww = hh * w / h;
+    c.left = -ww; c.right = ww; c.top = hh; c.bottom = -hh;
+    const top = S.insetTop(), right = S.insetRight(), dy = (inset - top) / 2, dx = right / 2;
+    if((Math.abs(dy) > 1 || dx > 1) && inset < h * 0.8) c.setViewOffset(w, h, dx, dy, w, h); else c.clearViewOffset();
     c.updateProjectionMatrix();
     o.phi = U.clamp(o.phi, 0.04, Math.PI - 0.04);
     o.dist = U.clamp(o.dist, 8, 3000);
     c.position.set(
-      o.target.x + o.dist * Math.sin(o.phi) * Math.sin(o.theta),
-      o.target.y - o.dist * Math.sin(o.phi) * Math.cos(o.theta),
-      o.target.z + o.dist * Math.cos(o.phi));
+      o.target.x + S.CAMD * Math.sin(o.phi) * Math.sin(o.theta),
+      o.target.y - S.CAMD * Math.sin(o.phi) * Math.cos(o.theta),
+      o.target.z + S.CAMD * Math.cos(o.phi));
     c.up.set(0, 0, 1);
     c.lookAt(o.target);
-    S.scene.fog.near = o.dist * 2; S.scene.fog.far = o.dist * 7;
   },
 
   /* ---------- camera moves ---------- */
@@ -121,33 +142,52 @@ GW.Scene = {
     }, { ease: 'inOut', key: 'cam' });
   },
   view(name){
-    const S = GW.Scene, f = S.fitPlan();
-    const a = { iso: { theta: -0.55, phi: 1.0 }, top: { theta: 0, phi: 0.06 }, front: { theta: 0, phi: Math.PI / 2 - 0.02 }, side: { theta: Math.PI / 2, phi: Math.PI / 2 - 0.02 } }[name];
-    S.flyTo(Object.assign({ dist: f.dist, target: f.target }, a), 800);
-  },
-  /* where the camera has to sit to see every visible gear (and chain / belt) */
-  fitPlan(list){
     const S = GW.Scene;
+    const a = { iso: { theta: -0.55, phi: 1.0 }, top: { theta: 0, phi: 0.06 }, front: { theta: 0, phi: Math.PI / 2 - 0.02 }, side: { theta: Math.PI / 2, phi: Math.PI / 2 - 0.02 } }[name];
+    S.fit(false, null, a);
+  },
+  /* where the camera has to sit to see every visible gear (and chain / belt): as close as it can get without
+     cutting anything off. Every vertex is projected onto the screen plane of the view that will be shown, so the
+     frame hugs the real outline of the build, not a loose box around it. */
+  fitPlan(list, ang){
+    const S = GW.Scene, o = S.orbit;
     list = list || GW.Gears.list.filter(g => g.mesh.visible);
     if(!list.length) return { target: new T.Vector3(0, 0, 0), dist: 150 };
     GW.Layout.update(0);
-    const box = new T.Box3();
+    const th = ang && ang.theta != null ? ang.theta : o.theta, ph = ang && ang.phi != null ? ang.phi : o.phi;
+    const dir = new T.Vector3(Math.sin(ph) * Math.sin(th), -Math.sin(ph) * Math.cos(th), Math.cos(ph));          // toward the camera
+    const right = new T.Vector3().crossVectors(new T.Vector3(0, 0, 1), dir).normalize();
+    const up = new T.Vector3().crossVectors(dir, right).normalize();
+    let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9, d0 = 1e9, d1 = -1e9;
+    const take = v => { const x = v.dot(right), y = v.dot(up), d = v.dot(dir); if(x < x0) x0 = x; if(x > x1) x1 = x; if(y < y0) y0 = y; if(y > y1) y1 = y; if(d < d0) d0 = d; if(d > d1) d1 = d; };
+    const v = new T.Vector3(), m = new T.Matrix4();
     list.forEach(g => {
-      g.mesh.updateMatrixWorld(true); g.mesh.geometry.computeBoundingBox();
+      const pos = g.mesh.geometry.attributes.position; if(!pos) return;
       const sc = g.scale == null || g.scale < 0.05 ? 1 : g.scale;
-      const b = g.mesh.geometry.boundingBox.clone();
-      box.union(b.applyMatrix4(new T.Matrix4().compose(g.mesh.position, g.mesh.quaternion, new T.Vector3(sc, sc, sc))));
+      m.compose(g.mesh.position, g.mesh.quaternion, new T.Vector3(sc, sc, sc));
+      const step = Math.max(1, Math.floor(pos.count / 2500));
+      for(let i = 0; i < pos.count; i += step){ v.fromBufferAttribute(pos, i).applyMatrix4(m); take(v); }
     });
-    GW.Drives.items.forEach(d => { d.group.updateMatrixWorld(true); box.expandByObject(d.group); });
-    const c = box.getCenter(new T.Vector3()), r = Math.max(box.getSize(new T.Vector3()).length() / 2, 12);
-    const { w, h } = S.size(), hh = Math.max(h - S.insetBottom(), h * 0.3);
-    const half = Math.atan(Math.min(1, w / hh) * Math.tan(U.rad(S.camera.fov * hh / h / 2)));
-    return { target: c, dist: Math.max(40, r / Math.sin(half) * 1.15) };
+    const box = new T.Box3();
+    GW.Drives.items.forEach(d => { d.group.updateMatrixWorld(true); box.makeEmpty(); box.expandByObject(d.group); if(!box.isEmpty()) for(let i = 0; i < 8; i++) take(new T.Vector3(i & 1 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z)); });
+    if(x0 > x1) return { target: new T.Vector3(0, 0, 0), dist: 150 };
+    const { w, h } = S.size(), vis = Math.max(h - S.insetBottom() - S.insetTop(), h * 0.3), visW = Math.max(w - S.insetRight(), w * 0.4), pad = 1.04;
+    const perPx = Math.max((x1 - x0) * pad / visW, (y1 - y0) * pad / vis, 12 / Math.min(visW, vis));      // world units per pixel
+    const target = right.clone().multiplyScalar((x0 + x1) / 2).addScaledVector(up, (y0 + y1) / 2).addScaledVector(dir, (d0 + d1) / 2);
+    return { target, dist: Math.max(8, perPx * h / 2 / S.HALF) };
   },
-  fit(instant, list){
-    const S = GW.Scene, f = S.fitPlan(list);
+  fit(instant, list, ang){
+    const S = GW.Scene, f = S.fitPlan(list, ang);
+    S.auto = { list, ang };                                     // keep the frame snug until the camera is moved by hand
     if(instant){ S.orbit.target.copy(f.target); S.orbit.dist = f.dist; return; }
-    S.flyTo({ target: f.target, dist: f.dist }, 750);
+    S.flyTo(Object.assign({ target: f.target, dist: f.dist }, ang || {}), 750);
+  },
+  /* the strip along the bottom changes height as its content changes: the frame follows so nothing hides behind it */
+  followInset(){
+    const S = GW.Scene; if(!S.auto) return;
+    const key = Math.round(S.measure().bottom / 16) + ':' + S.insetTop() + ':' + S.insetRight() + ':' + S.size().w + 'x' + S.size().h;
+    if(key === S._fk) return; S._fk = key;
+    clearTimeout(S._ft); S._ft = setTimeout(() => { if(S.auto) { const live = S.auto.list && S.auto.list.filter(g => GW.Gears.list.includes(g)); S.fit(false, live && live.length ? live : null, S.auto.ang); } }, 160);
   },
 
   /* ---------- mouse / touch ---------- */
@@ -158,7 +198,7 @@ GW.Scene = {
     const stopFly = () => GW.Anim.list.forEach(t => { if(t.key === 'cam') t.stopped = true; });
     const pan = (dx, dy) => {
       const { h } = S.size();
-      const f = o.dist * Math.tan(U.rad(S.camera.fov / 2)) * 2 / h;
+      const f = o.dist * S.HALF * 2 / h;
       const dir = S.camera.getWorldDirection(new T.Vector3());
       const right = new T.Vector3().crossVectors(dir, S.camera.up).normalize();
       const up = new T.Vector3().crossVectors(right, dir).normalize();
@@ -182,6 +222,7 @@ GW.Scene = {
       const dx = e.clientX - prev.x, dy = e.clientY - prev.y;
       ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
       moved += Math.abs(dx) + Math.abs(dy);
+      if(moved > 5) S.auto = null;                       // moved by hand: stop re-framing
       if(ptrs.size === 1){
         if(panning) pan(dx, dy); else { o.theta -= dx * 0.006; o.phi -= dy * 0.006; }
       } else if(ptrs.size === 2){
@@ -202,6 +243,7 @@ GW.Scene = {
     el.addEventListener('pointercancel', up);
     el.addEventListener('pointerleave', () => S.setHover(null));
     el.addEventListener('wheel', e => {
+      S.auto = null;
       e.preventDefault(); stopFly();
       o.dist *= Math.exp(Math.sign(e.deltaY) * Math.min(Math.abs(e.deltaY), 120) * 0.0011);
     }, { passive: false });
@@ -255,10 +297,36 @@ GW.Scene = {
     S._helperGroup = grp;
   },
 
-  render(){
-    const S = GW.Scene;
+  /* ---------- frame budget ---------- */
+  wake(n){ GW.Scene._wake = Math.max(GW.Scene._wake || 0, n || 8); },
+  /* true when the picture could have changed since the last draw */
+  changed(spinning){
+    const S = GW.Scene, o = S.orbit, G = GW.Gears;
+    const r = v => Math.round(v * 200);                                    // ignore changes too small to see
+    const sig = [r(o.theta), r(o.phi), r(o.dist), r(o.target.x), r(o.target.y), r(o.target.z), Math.round(S._inset || 0), S.size().w, S.size().h, G.version, GW.UI.selId, S.hoverId, S.gridOn, GW.UI._sv, r(S.grid.material.opacity), GW.Anim.list.length].join('|');
+    const diff = sig !== S._sig; S._sig = sig;
+    if(diff) S._wake = Math.max(S._wake || 0, 30);                        // highlight fades and the like need a few more frames
+    S._moved = diff || S._wake > 0;                                     // the picture itself changed (not just a turning gear)
+    return diff || spinning || S._wake > 0;
+  },
+  render(now){
+    const S = GW.Scene, G = GW.Gears;
+    const spinning = G.spin && G.list.length > 0 && G.speed > 0;
+    // slow machines: 30 frames a second at most
+    if(S.lite && now != null && S._lastDraw != null && now - S._lastDraw < 30) return;
     S.updateCam();
+    if(!S.changed(spinning)) return;                                      // nothing moved: leave the last picture on screen
+    if(S._wake > 0) S._wake--;
+    const t0 = performance.now();
     S.renderer.render(S.scene, S.camera);
+    if(GW.Labels && S._moved) GW.Labels.update();
+    const dt = performance.now() - t0, gap = now != null && S._lastDraw != null ? now - S._lastDraw : 0;
+    S._lastDraw = now != null ? now : t0;
+    // frames that keep taking too long: switch the light mode on for good
+    if(!S.lite && spinning && gap > 0){
+      S._slow = (S._slow || 0) * 0.9 + (gap > 40 ? 1 : 0);
+      if(S._slow > 6){ S.lite = true; S.renderer.setPixelRatio(1); S.resize(); GW.Perf.lite = true; try { localStorage.setItem('gm.lite', '1'); } catch(e){} }
+    }
   }
 };
 })();
