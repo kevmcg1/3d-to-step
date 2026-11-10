@@ -3510,7 +3510,7 @@ function resetXf(initial) {
   if (!initial) { toast('Transform reset'); Hist.push('Reset the transform'); }
 }
 function worldMinY() { const e = holder.matrixWorld.elements, vp = S.view.vpos; let mn = Infinity; for (let i = 0; i < vp.length; i += 3) { const y = e[1] * vp[i] + e[5] * vp[i + 1] + e[9] * vp[i + 2] + e[13]; if (y < mn) mn = y; } return mn; }
-function dropToFloor() { pivot.updateMatrixWorld(true); const dy = worldMinY(); animatePivot({ pos: pivot.position.clone().add(new THREE.Vector3(0, -dy, 0)), label: 'Dropped to the floor' }); }
+function dropToFloor() { if (!S.view) return; pivot.updateMatrixWorld(true); const dy = worldMinY(); animatePivot({ pos: pivot.position.clone().add(new THREE.Vector3(0, -dy, 0)), label: 'Dropped to the floor' }); }
 function centerOnOrigin() { animatePivot({ pos: new THREE.Vector3(0, pivot.position.y, 0), label: 'Centered on the origin' }); }
 function anchorToOrigin() { animatePivot({ pos: new THREE.Vector3(0, 0, 0), label: 'Pivot moved to the origin' }); }
 function animatePivot({ pos, quat, scl, label }) {
@@ -3518,6 +3518,7 @@ function animatePivot({ pos, quat, scl, label }) {
   tween(380, (e) => { if (pos) pivot.position.lerpVectors(p0, pos, e); if (quat) pivot.quaternion.slerpQuaternions(q0, quat, e); if (scl) pivot.scale.lerpVectors(s0, scl, e); syncFields(); }, () => { S.xfVer++; Sheet.invalidate(); Hist.push(label || 'Moved the part'); });
 }
 function quickRotate(axis, deg) {
+  if (!S.view) return;   // nothing loaded yet
   const ax = { X: [1, 0, 0], Y: [0, 1, 0], Z: [0, 0, 1] }[axis], v = new THREE.Vector3(...ax).transformDirection(Rz()), q = new THREE.Quaternion().setFromAxisAngle(v, deg * Math.PI / 180);
   animatePivot({ quat: q.multiply(pivot.quaternion.clone()), label: 'Rotated ' + deg + '° about ' + axis });
 }
